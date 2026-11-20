@@ -43,7 +43,7 @@ Conventional desktop AI agents remain **static from the day they ship**. When an
 
 1. **Capture real friction**: You ask factory-seed Harnex `v0` to normalize mixed-encoding (`GB18030` / `UTF-8 BOM`) desktop billing CSVs. It struggles (`7 steps · 3 errors`), or you click **Pause** once mid-run to steer it onto the right track.
 2. **Evolve and verify in isolation**: Powered by Google Research's **Harness²** dual-layer recursion, Harnex diagnoses the trajectory contrast, **authors a reusable TypeScript parser script**, probes it inside a Copy-on-Write shadow workspace, and passes an **anonymous shuffled A/B blind judge** (`v0` vs. `v1`)—requiring zero pre-labeled ground truth.
-3. **Unseen tasks fly**: Once accepted into your versioned genome, the **exact same model** approaches a brand-new unseen folder (`dataset_b`) and finishes in **2 steps · 0 errors · 58% fewer tokens**.
+3. **Generalizes to unseen tasks**: Once accepted into your versioned genome, the **exact same model** approaches a brand-new unseen folder (`dataset_b`) and finishes in **2 steps · 0 errors · 58% fewer tokens**.
 
 | Dimension | Static Desktop Agents | ⚡ Harnex |
 | :--- | :--- | :--- |
@@ -58,7 +58,15 @@ Conventional desktop AI agents remain **static from the day they ship**. When an
 ## Meet the Command Deck
 
 <div align="center">
-  <img src="assets/ui-command-deck-en.png" alt="Harnex Command Deck Desktop UI (Real Build Screenshot)" width="100%" />
+  <img src="assets/ui-v2-deck-en.png" alt="Harnex Command Deck Desktop UI — Generation Pass-Rate Trend, 6-Pillar Capability Radar, Proposal Uplift & Blind Judge Review" width="100%" />
+</div>
+
+<br />
+
+### Evolution Lab — Guided Capability Architect & Live Evolution Theater
+
+<div align="center">
+  <img src="assets/ui-v2-lab-en.png" alt="Harnex Evolution Lab — 7 Capability Pillars, Guided Evolution Architect & Live Evolution Theater" width="100%" />
 </div>
 
 <br />
@@ -70,7 +78,7 @@ Conventional desktop AI agents remain **static from the day they ship**. When an
       Notice the agent drifting off course? Click <strong>Pause</strong>, provide a brief correction, and hit <strong>Resume</strong>. Harnex finishes your active task immediately—and automatically tags your steer as a high-signal cue for background evolution.
     </td>
     <td width="50%" valign="top">
-      <h3>🔬 Live Evolution Theater — Zero Black-Box Magic</h3>
+      <h3>🔬 Live Evolution Theater — Full Observability, Zero Black Box</h3>
       Inspect dual-track proposals, live shadow-sandbox metrics (steps, errors, latency, cost), and the shuffled <strong>Blind Judge A/B</strong> verdict. Want to refine an evolved script? Leave an <strong>inline comment on any Diff line</strong> to trigger targeted re-evolution.
     </td>
   </tr>

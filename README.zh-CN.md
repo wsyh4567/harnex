@@ -58,7 +58,15 @@
 ## 桌面指挥台 · Command Deck
 
 <div align="center">
-  <img src="assets/ui-command-deck-zh.png" alt="Harnex 桌面指挥台（Command Deck）真实中文界面截图" width="100%" />
+  <img src="assets/ui-v2-deck-zh.png" alt="Harnex 桌面指挥台（Harness² 指挥台）真实中文界面截图：代际通过率趋势、六大能力维度雷达图与提案对比" width="100%" />
+</div>
+
+<br />
+
+### Evolution Lab 进化实验室 — 能力大类规划与交互式进化控制台
+
+<div align="center">
+  <img src="assets/ui-v2-lab-zh.png" alt="Harnex 进化实验室真实中文界面截图：七大能力大类、引导式进化规划助手与活体手术台" width="100%" />
 </div>
 
 <br />
