@@ -4,13 +4,17 @@
   <img src="assets/banner.png" alt="Harnex — Born Small. Grows Itself." width="100%" />
 </p>
 
-<h3>极简不可变安全桌面外壳 + 指数级自进化 Harness² 内核 —— 出厂极小，自我生长。</h3>
+<h1>会自己长本事的桌面 AI Agent。</h1>
+
+<p>
+  <strong>别再一遍遍手改 Prompt 了。你只要中途纠正它一次，Harnex 就会在系统沙盒里自己写新工具、做匿名盲测验优、存入版本库——下次遇到同类任务，直接一把过。</strong>
+</p>
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-00F0FF?style=for-the-badge&logo=apache&logoColor=white&labelColor=0D1117" alt="License: Apache-2.0" /></a>
-  <a href="docs/ARCHITECTURE.md"><img src="https://img.shields.io/badge/Stack-Tauri%202%20%C2%B7%20Rust%20%C2%B7%20Bun-8B5CF6?style=for-the-badge&logo=rust&logoColor=white&labelColor=0D1117" alt="Built with Tauri 2 + Rust + Bun" /></a>
-  <a href="NOTICE"><img src="https://img.shields.io/badge/Engine-Harness%C2%B2%20%E5%8F%8C%E5%B1%82%E9%80%92%E5%BD%92%20RSI-00F0FF?style=for-the-badge&labelColor=0D1117" alt="Harness² Dual-Layer RSI" /></a>
-  <a href="docs/ARCHITECTURE.md#3-platform-support-matrix-honest-disclosure"><img src="https://img.shields.io/badge/OS%20Sandbox-macOS%20%C2%B7%20Linux%20%C2%B7%20Win%20Beta-8B5CF6?style=for-the-badge&labelColor=0D1117" alt="Platform Support" /></a>
+  <a href="docs/ARCHITECTURE.md#3-platform-support-matrix-honest-disclosure"><img src="https://img.shields.io/badge/Desktop-macOS%20%C2%B7%20Linux%20%C2%B7%20Win%20Beta-8B5CF6?style=for-the-badge&labelColor=0D1117" alt="桌面平台支持" /></a>
+  <a href="docs/ARCHITECTURE.md"><img src="https://img.shields.io/badge/Built%20With-Rust%20%C2%B7%20Tauri%202%20%C2%B7%20Bun-00F0FF?style=for-the-badge&logo=rust&logoColor=white&labelColor=0D1117" alt="技术栈" /></a>
+  <a href="NOTICE"><img src="https://img.shields.io/badge/Powered%20By-Harness%C2%B2-8B5CF6?style=for-the-badge&labelColor=0D1117" alt="Harness² 自进化引擎" /></a>
   <a href="https://github.com/wsyh4567/harnex/stargazers"><img src="https://img.shields.io/github/stars/wsyh4567/harnex?style=for-the-badge&color=00F0FF&labelColor=0D1117&logo=github" alt="GitHub Stars" /></a>
 </p>
 
@@ -21,30 +25,40 @@
   <a href="docs/EVOLUTION_BLUEPRINTS.md">V2+ 开放共创蓝图</a>
 </p>
 
-> **开发状态说明（V1.0 研发中）**：Harnex 目前正处于 V1.0 核心工程建设期。本仓库率先公开项目愿景、品牌视觉、四层安全架构设计及 V2+ 开放共创蓝图；代码合龙后将第一时间发布首个可用桌面安装包。欢迎点亮 **Star** 或在 **Discussions** 参与讨论！
+> **V1.0 开发冲刺中**：Harnex 正在进行 V1.0 核心工程建设，本仓库率先开放产品愿景、安全架构设计与 V2+ 进化蓝图。点亮 **Star** 抢先关注首发安装包，或到 **Discussions** 投票决定 V2+ 下一个优先落地的功能！
 
 </div>
 
 ---
 
-## 为什么选择 Harnex？
+## 60 秒看懂核心震撼：真正会“长记性”的桌面 Agent
 
-绝大多数桌面 AI Agent 出厂即塞满臃肿的静态提示词与易冲突的插件树，且永远无法从你电脑上的真实踩坑中长记性。**Harnex** 反其道而行之：从极其轻薄干净的出厂种子（`harness-seed/`）出发，将其锁进**不可变 Rust L0 四层安全底座**，并在真实任务的失败与人类中途纠偏（**Pause → Steer → Evolve**）中，自己造出工具脚本、沉淀 Skills 与分领域经验库。
+<div align="center">
+  <img src="assets/evolution-proof.png" alt="Harnex 进化前后对比：v0 到 v1 跃迁" width="96%" />
+</div>
 
-| 对比维度 | 传统静态桌面 Agent | ⚡ Harnex |
+市面上的大多数桌面 AI Agent 都是**“金鱼记忆”**——在你的本地文件格式、编码乱码或个人工作习惯上踩了一次坑，下周遇到同样的活还是会一模一样地翻车，除非**你**亲自去手改提示词或满世界找插件。
+
+**Harnex 在不微调模型权重的前提下，自己给自己升级装备：**
+
+1. **真实踩坑，中途纠偏**：你让出厂白纸版 `v0` 整理一批混合编码的桌面账单文件，它来回试错折腾了 `7 步 · 3 次报错`，或者你在运行中途点击 **暂停（Pause）** 指正了它一句。
+2. **后台活体进化**：基于 Google Research **Harness²** 双层递归算法，Harnex 在后台复盘失败原因，**自己动手写出一个可复用的 TypeScript 解析脚本**，拉起隔离的影子沙盒验证零报错，再通过**正反序匿名盲选裁判（Blind Judge A/B）**确认新版真的大幅胜出——全程无需预设标准答案。
+3. **换新数据直接起飞**：你点一下采纳落盘，面对一个**从未见过的新文件夹**，**完全相同的模型**直接调用自己刚造的新工具，**2 步 · 0 报错 · 省下 58% Token** 一把搞定。
+
+| 你感受到的差异 | 传统静态桌面 Agent | ⚡ Harnex |
 | :--- | :--- | :--- |
-| **出厂体积与初始复杂度** | 静态 Prompt 臃肿、预装海量冗余插件 | **极简干净出厂种子** —— 按你的真实桌面工作流按需生长 |
-| **自我改进能力** | 踩坑只能人工改 Prompt 或到处找插件 | **Harness² 双层递归 RSI** —— 自动双轨提案、沙盒试跑、盲选判胜、经验沉淀 |
-| **安全执行边界** | 依赖同进程脚本或易被绕过的正则黑名单 | **Rust L0 四层纵深防御** —— OS 物理沙盒（`BUN_BE_BUN=1`）、SHA-256 信任库、独立无污染 Guardian AI |
-| **并发与版本稳定性** | 越改越乱、并发任务撕裂、无可靠回滚 | **内嵌 `libgit2` 基因库** —— 线程钉死 Commit SHA、三方合并、`auto` 模式健康恶化自动熔断回滚 |
-| **首次启动体验** | 空白聊天框冷启动，无从下手 | **双模式首启试炼场** —— 免 Key 直接观看真实录制回放，配好供应商即跑实时活体进化 |
+| **开箱状态** | 出厂塞满臃肿提示词与冗余插件 | **极简干净出厂种子** —— 只长出你日常真正用得上的本事 |
+| **踩坑之后** | 下次照样犯错，逼你自己手改配置 | **自己写修复脚本** —— 在隔离影子沙盒验证有效后再入库 |
+| **干活过程** | 要么干瞪眼看着跑偏，要么直接重开聊天 | **随时暂停纠偏（Pause → Steer）** —— 教它一次自动送进进化队列 |
+| **桌面安全** | 脚本直接裸奔在系统权限里，网页注入可能持久化 | **Rust 四层保险库** —— OS 级物理沙盒、Hook SHA-256 指纹锁、防注入独立安审 |
+| **升级风险** | 改了提示词后，原本能跑的旧任务悄悄退化 | **Git 时光机** —— 每次进化有 Diff、可对比 `v0/v1`、退化自动回滚 |
 
 ---
 
-## 活体进化指挥台（Living Agent Command Deck）
+## 认识你的指挥台：Living Agent Command Deck
 
 <div align="center">
-  <img src="assets/command-deck-preview.png" alt="Harnex Living Agent Command Deck UI 预览" width="96%" />
+  <img src="assets/command-deck-preview.png" alt="Harnex 活体进化指挥台界面预览" width="96%" />
 </div>
 
 <br />
@@ -52,117 +66,88 @@
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>⏸ 暂停纠偏即进化（Pause → Steer → Evolve）</h3>
-      任务执行中随时点击暂停并输入纠偏方向继续执行。Harnex 会自动将你的中途介入标记为高价值进化信号，任务结束后立即送入后台 Harness² 进化队列。
+      <h3>⏸ 中途喊停，教它一次就长记性</h3>
+      发现 Agent 方向跑偏了？随时点一下 <strong>暂停（Pause）</strong> 纠正方向后继续执行。当前任务照常立刻完成，同时这次人工纠偏会自动打标，驱动后台针对性自我进化。
     </td>
     <td width="50%" valign="top">
-      <h3>🔬 进化手术台与盲选竞技场（Blind Judge A/B）</h3>
-      在按需 Copy-on-Write 影子沙盒中同时试跑通用与领域双轨提案；固定种子正反序盲选消除偏置，<code>NO_ENTRY</code> 自动过滤无效噪声；支持在 Diff 任意行直接留批注触发定向复进化。
+      <h3>🔬 进化现场直播，拒绝玄学黑盒</h3>
+      实时观看它生成提案、在影子工作区实测跑分，以及匿名洗牌的 <strong>Blind Judge A/B 盲选推理</strong>。对它进化出的脚本某一行不满意？直接在 <strong>Diff 行内留批注</strong>，一键触发定向复进化。
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>🧬 基因演化轴与 v0 / v1 跨代回放</h3>
-      基于内嵌 <code>libgit2</code> 直观浏览 <code>~/.harnex/harness/</code> 演化历史。用完全相同的 Solver 模型对比重跑 <code>v0 vs v1</code>，一键回滚，或经密钥/PII 扫描后导出脱敏基因包（导入第三方基因默认未信任禁用）。
+      <h3>⏪ 像管理代码一样回滚和分享你的 Agent</h3>
+      所有进化都由内嵌 <code>libgit2</code> 自动保存为 Git 版本。用同一款便宜模型一键对比重跑 <code>v0 vs v1</code> 直观感受差距，随时一键回滚，还能经密钥/隐私扫描后导出基因包分享给社区。
     </td>
     <td width="50%" valign="top">
-      <h3>🔌 三槽位路由与一键导入供应商</h3>
-      分别为 <strong>Solver</strong>、<strong>Improver</strong>、<strong>Judge</strong> 配置独立模型。支持手动添加 OpenAI 兼容 / Anthropic / Gemini / Ollama，或一键只读导入 <strong>CC Switch</strong> 与本地 <strong>Magpie</strong> 网关（密钥全部存入系统原生钥匙串）。
+      <h3>🔌 10 秒接入你的模型，支持一键导入</h3>
+      支持为 <strong>执行（Solver）</strong>、<strong>进化（Improver）</strong>、<strong>裁判（Judge）</strong> 分别指定模型（OpenAI 兼容 / Claude / Gemini / DeepSeek / 本地 Ollama），或一键只读导入 <strong>CC Switch</strong> 与本地 <strong>Magpie</strong> 网关。
     </td>
   </tr>
 </table>
 
 ---
 
-## 不可变 Rust L0 安全壳 + Harness² 双层架构
+## 造得像金库一样稳：为什么敢放它真机干活？
 
 <div align="center">
-  <img src="assets/evolution-loop.png" alt="Harnex 不可变 Rust L0 与 Harness² 递归进化引擎架构图" width="92%" />
+  <img src="assets/evolution-loop.png" alt="Rust 安全金库包裹的 Harness² 递归进化引擎" width="92%" />
 </div>
 
-### 三层权限隔离（L0 / L1 / L2）
+让 AI 自己改写自己听起来很危险——但前提是你有没有用 Rust 把执行底座死死锁住。Harnex 让 Agent 的“大脑与工具箱”充分进化，同时把所有真实系统操作关进 **4 层对标 Codex 的安全金库**：
 
-```mermaid
-flowchart TB
-    Deck["活体进化指挥台 (React 19 + Tauri 2, F0-F4)"]
-    L0["Rust L0 不可变底座: OS 沙盒 / ExecPolicy / 信任库 / Guardian AI / libgit2 / 钥匙串 / 费用熔断"]
-    L1["Bun Sidecar (L1): @harnex/runtime + @harnex/evolution (Harness² + CoW 影子沙盒)"]
-    L2["~/.harnex/harness/ (L2): 极简出厂种子 -> 自进化基因树"]
+1. **真·系统级物理沙盒（`macOS Seatbelt` / `Linux bubblewrap & Landlock`）**：Agent 每次写文件、跑终端命令、甚至运行它**自己进化出来的脚本**，全都在 Rust 拉起的操作系统物理沙盒内执行——物理层面严禁触碰你的 SSH 密钥、系统目录以及 Harnex 自身的安全防线。
+2. **聪明信任，不烦人**：你手动添加安装的 MCP 工具默认信任、零弹窗顺滑调用；Hook 脚本采用**首次信任 + SHA-256 指纹锁**，平时免打扰直接跑，哪怕被改了 1 个字节立刻失效并强制重新授权。
+3. **隔离式安全审查员（`auto` 全自动模式）**：开启自动模式后，由独立的 Guardian AI 在**完全屏蔽网页与外部脏文件**的干净上下文里审查风险命令，彻底免疫提示词注入。涉及核心指令与可执行代码的新增进化，**永远必须经过你的一次显式信任**才可生效。
+4. **原生钥匙串、花费熔断与健康自动回滚**：API Key 全存系统原生钥匙串，绝不落明文；Rust 强控每日费用上限防烧钱；内嵌 `libgit2` 持续监控成功率，一旦新进化版本导致任务频繁翻车，自动回滚到上一个健康版本。
 
-    Deck <-->|"Tauri IPC"| L0
-    L0 <-->|"JSON-RPC 2.0"| L1
-    L1 -->|"仅发送结构化意图与补丁"| L0
-    L0 -->|"校验并三方合并"| L2
-```
-
-> **核心安全铁律**：TypeScript Sidecar（L1）**绝不**直接写文件、执行 Shell、跑自造脚本或操作 Git。所有副作用均封装为强类型意图，下沉交由 **Rust L0** 在操作系统物理沙盒内校验执行。
-
-### 对标 Codex 的四层纵深安全防御
-
-| 防御层级 | Rust L0 模块 | 安全保障与信任规则 |
-| :--- | :--- | :--- |
-| **1. OS 级物理沙盒** | `sandbox_os.rs` + `executor.rs` | 默认 `workspace-write` 隔离；物理禁止写入 `.git/`、`~/.harnex/harness/`、`~/.ssh/`、`trust.json` 与系统关键目录。Agent 自造 `scripts/*.ts` 与 `hooks/*.ts` 由 Rust 在 OS 沙盒内拉起内嵌 `BUN_BE_BUN=1` 执行，彻底封堵 Bun 无权限模型漏洞。 |
-| **2. ExecPolicy 与 SHA-256 信任库** | `security.rs` (`~/.harnex/trust.json`) | 确定性命令前缀规则（`allow` / `prompt` / `forbidden`）。**用户主动安装的 MCP 默认信任**（零弹窗直接执行）；`hooks/*.ts` 采用**首次信任 + SHA-256 校验**（文件改动哪怕 1 个字节立刻失效并触发重新授权）。 |
-| **3. 独立无污染 Guardian AI（`auto` 模式）** | `guardian.rs` | 仅接收脱敏命令上下文（`sanitizedInputOnly: true`，严禁注入网页与外部脏文件防注入攻击）。高权 Harness 资产（`scripts/`、`hooks/`、`mcp/servers.json`、`systemprompt.md`、`guardrails.md`）即便在 `auto` 模式下也**必须经人类首次信任确认**。 |
-| **4. 内嵌 `libgit2`、原生钥匙串与费用熔断** | `git_store.rs`、`keyring.rs`、`budget.rs` | 零依赖系统 `git` 的唯一 Git 写入者；前台线程钉死 Commit SHA；`auto` 模式支持量化健康自动回滚；API Key 统一存入系统钥匙串；Rust 强制执行每日费用/Token 硬上限。 |
-
-### Harness² 双层递归自进化引擎
-
-架构衍生自 Google Research [`google-research/harness2`](https://github.com/google-research/harness2)（*Recursive Agent Harnessing for an Open World*）：
+### 自我进化是如何一步步闭环的？
 
 ```mermaid
 flowchart LR
-    RUN["任务执行 (钉死 Commit SHA)"] -->|"失败或暂停纠偏"| Q["后台进化队列"]
-    Q --> PROP["双轨提案 (Invariant + Domain)"]
-    PROP --> COW["按需 CoW 影子沙盒试跑 (Rust L0 OS 沙盒)"]
-    COW --> COMP["无标准答案对比合成 (Compose)"]
-    COMP --> JUDGE["匿名盲选 A/B (正反序洗牌)"]
-    JUDGE -->|"落败或无净收益"| ARCH["静默归档 (NO_ENTRY)"]
-    JUDGE -->|"胜出"| REG["regression_cases.jsonl 回归抽检"]
-    REG --> TRI["Evolution Triage (Diff 与行内批注复进化)"]
-    TRI -->|"采纳并信任"| MERGE["Rust libgit2 三方合并 (冲突标记 Needs Re-Probe)"]
-    MERGE --> LIB["meta/domains/INDEX.md + EXPERIENCE.md (Cue/Lesson/Evidence)"]
-    LIB -.->|"反哺未来提案"| PROP
+    RUN["1. 任务执行 (锁定版本快照)"] -->|"报错或中途暂停纠偏"| PROP["2. 双轨提出改进方案"]
+    PROP --> PROBE["3. 影子沙盒实测 (OS物理隔离)"]
+    PROBE --> JUDGE["4. 匿名 A/B 盲选裁判"]
+    JUDGE -->|"无明显收益"| DROP["静默归档不打扰"]
+    JUDGE -->|"明确胜出且回归通过"| TRIAGE["5. 分诊台 Diff 审阅与信任门控"]
+    TRIAGE -->|"提交版本并提炼教训"| LIB["6. 沉淀可复用脚本与领域经验"]
+    LIB -.->|"加速解决未来新任务"| PROP
 ```
 
----
-
-## 首启双模式试炼场（不造假、零门槛）
-
-拒绝空白聊天框冷启动与不可控的“黑盒演示”：
-- **🎬 录制回放模式（默认，无需 API Key）**：首次打开即可零门槛完整观看一次真实录制的 `dataset_a`（`GB18030` + `UTF-8 BOM` 乱码账单）`v0 → v1` 进化回放，界面明确标示为录制轨迹。
-- **⚡ 实时进化模式（配置供应商后开启）**：界面透明预估耗时与 Token 费用，可在 `dataset_a` 与未见验证集 `dataset_b` 上真实跑通“翻车 → 手术台自造工具 → 沙盒零报错盲选胜出 → 未见数据秒过”的完整闭环。
+> 想了解 `L0/L1/L2` 权限边界、`BUN_BE_BUN=1` 单文件沙盒、线程版本锁定及最低模型配置建议？欢迎阅读完整 [架构与安全白皮书](docs/ARCHITECTURE.md)。
 
 ---
 
-## 平台支持矩阵
+## 首启 3 分钟震撼体验 & 平台支持
 
-| 操作系统 | 支持级别 | OS 沙盒后端 | 钥匙串后端 |
+告别空白聊天框冷启动，也不搞弄虚作假的“魔法演示”：
+- **🎬 录制回放模式（默认，免 API Key）**：打开软件即可零门槛看一遍真实录制的 `v0 → v1` 完整进化轨迹（明确标注为录制回放），3 分钟看懂核心机制。
+- **⚡ 实时进化模式（配好供应商后开启）**：界面透明提示预计耗时与 Token 费用，用你自己的模型在 `dataset_a` 演练集与未见验证集 `dataset_b` 上真刀真枪跑完一次进化跃迁。
+
+| 操作系统 | 支持级别 | OS 沙盒机制 | 钥匙串存储 |
 | :--- | :--- | :--- | :--- |
 | **macOS** | **完整支持** | Seatbelt (`sandbox-exec`) | macOS Keychain |
 | **Linux** | **完整支持** | `bubblewrap` / `Landlock` | Secret Service (D-Bus) |
-| **Windows** | **Beta 支持** | Job Object + 受限令牌 + Rust 路径规范化 *(文件系统隔离范围较 POSIX 沙盒弱)* | Windows Credential Manager |
-
-完整安全边界、最低模型能力建议及 Windows Beta 差异披露请参阅 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+| **Windows** | **Beta** | Job Object + 受限令牌 + 路径规范化 *(文件系统隔离范围较 POSIX 弱，白皮书已如实披露)* | Windows Credential Manager |
 
 ---
 
-## V2+ 开放共创蓝图（Open Blueprints）
+## 出厂极简，开放共创（V2+ 进化蓝图）
 
-**Harnex V1.0** 坚持极简、可审计的种子内核，不闭门造车堆砌重型业务；我们在 [docs/EVOLUTION_BLUEPRINTS.md](docs/EVOLUTION_BLUEPRINTS.md) 公开了 6 大进阶演进蓝图：
+Harnex V1.0 坚持精简、可控、可审计的内核，不闭门造车提前写死一堆用户不想要的复杂功能；我们在 [docs/EVOLUTION_BLUEPRINTS.md](docs/EVOLUTION_BLUEPRINTS.md) 公开了 6 大开放蓝图，由社区共同决定进化方向：
 
-1. **进阶记忆体系** —— 分层记忆压缩与本地 SQLite 向量/图谱检索
-2. **社区 Hook 共享库** —— 标准化防错、隐私脱敏与自动格式化 Hook 集
-3. **Skills 生命周期引擎** —— 跨领域模式挖掘、语义去重、合并升级与失效淘汰
-4. **多子代理协同编排** —— 专职角色模板包与 DAG 并行任务树
+1. **进阶记忆系统** —— 分层记忆压缩与本地 SQLite 语义/图谱检索
+2. **社区 Hook 共享库** —— 标准化防错、隐私脱敏与自动格式化钩子
+3. **Skills 生命周期引擎** —— 跨领域模式挖掘、语义去重、合并与淘汰
+4. **多子代理并行协同** —— 专职角色包与 DAG 并行执行树
 5. **MCP 运维台与办公模板** —— 图形化诊断、OAuth 助手与开箱即用办公工具包
-6. **进阶沙盒规则包与 `views/` 动态视图** —— 单调加固安全策略与受限 L2 交互卡片生态
+6. **进阶沙盒规则与 `views/` 动态视图** —— 单调加固安全策略与受限 L2 交互卡片
 
-> **一起投票与自进化共创**：欢迎前往 **GitHub Discussions** 为你最期待的蓝图投票，或者直接把蓝图喂给你本地的 Harnex，让它自我进化出新能力并附带 `BlindJudgeResult` 评测对比数据提交 PR！
+> **一起投票，甚至让 Harnex 自己发 PR**：点亮 **Star** 关注项目，去 **GitHub Discussions** 给你最想要的功能投票——或者直接把蓝图喂给你本地的 Harnex，让它自己进化出解决方案并提 PR！
 
 ---
 
 ## 开源协议与致谢
 
 本项目基于 [Apache License 2.0](LICENSE) 开源。
-核心双层递归进化引擎架构衍生自 Google Research 的 [`google-research/harness2`](https://github.com/google-research/harness2)（Copyright 2026 Google LLC, Apache-2.0），完整版权与修改声明见 [NOTICE](NOTICE)。
+核心双层递归进化机制衍生自 Google Research 的 [`google-research/harness2`](https://github.com/google-research/harness2)（Copyright 2026 Google LLC, Apache-2.0），详见 [NOTICE](NOTICE)。
