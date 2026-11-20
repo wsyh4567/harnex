@@ -7,7 +7,7 @@
 <h1>The Self-Evolving Desktop AI Agent.</h1>
 
 <p>
-  <strong>Stop rewriting prompts. Correct Harnex once—it writes its own tools, proves them in an OS sandbox, and beats its past self on the exact same model.</strong>
+  <strong>Stop rewriting prompts. Correct Harnex once—it authors its own tools, validates them in an OS sandbox, and outperforms its past self on the exact same model.</strong>
 </p>
 
 <p>
@@ -25,40 +25,40 @@
   <a href="docs/EVOLUTION_BLUEPRINTS.md">V2+ Open Blueprints</a>
 </p>
 
-> **V1.0 Active Launch Build**: Harnex is in active V1.0 engineering build—this repository showcases our product vision, visual architecture, and open V2+ blueprints ahead of the first release binaries. **Star the repo** to follow the launch or jump into **Discussions** to vote on what ships next!
+> **V1.0 Final Launch Sprint**: The Harnex Command Deck desktop UI is already running locally (real screenshot below). Source code integration and desktop release packages are being finalized for public push—**Star the repo** to follow the release or join **Discussions** to shape V2+ priorities.
 
 </div>
 
 ---
 
-## The 60-Second Proof: An Agent That Actually Outgrows Its Mistakes
+## One Correction. Continuous Evolution.
 
 <div align="center">
   <img src="assets/evolution-proof.png" alt="Before v0 vs After v1 — Harnex Self-Evolution Proof" width="96%" />
 </div>
 
-Most desktop AI agents are **amnesiacs**. When an agent trips over messy local files, encoding quirks, or your personal workflow, it makes the exact same mistake next week—unless *you* manually edit its system prompts or hunt for plugins.
+Conventional desktop AI agents remain **static from the day they ship**. When an agent trips over messy local files, encoding quirks, or your team's workflow, it makes the exact same mistake next week—unless *you* manually rewrite system prompts or hunt for plugins.
 
-**Harnex evolves on the job, without changing model weights:**
+**Harnex evolves its capabilities on the job, with model weights completely frozen:**
 
-1. **You hit a real snag**: You ask Harnex `v0` to parse messy multi-encoding desktop billing CSVs. It stumbles (`7 steps · 3 errors`), or you hit **Pause** once mid-run to point it in the right direction.
-2. **Harnex evolves in the background**: Powered by Google Research's **Harness²** dual-layer recursion, Harnex diagnoses what went wrong, **writes its own reusable TypeScript parser script**, tests it inside an isolated Copy-on-Write shadow workspace, and runs an **anonymous A/B blind judge** (`v0` vs. `v1`) to verify a real win—no ground-truth answer key required.
-3. **Unseen tasks fly**: Once approved into your versioned genome, the **exact same model** walks up to a brand-new unseen folder (`dataset_b`) and finishes in **2 steps · 0 errors · 58% fewer tokens**.
+1. **Capture real friction**: You ask factory-seed Harnex `v0` to normalize mixed-encoding (`GB18030` / `UTF-8 BOM`) desktop billing CSVs. It struggles (`7 steps · 3 errors`), or you click **Pause** once mid-run to steer it onto the right track.
+2. **Evolve and verify in isolation**: Powered by Google Research's **Harness²** dual-layer recursion, Harnex diagnoses the trajectory contrast, **authors a reusable TypeScript parser script**, probes it inside a Copy-on-Write shadow workspace, and passes an **anonymous shuffled A/B blind judge** (`v0` vs. `v1`)—requiring zero pre-labeled ground truth.
+3. **Unseen tasks fly**: Once accepted into your versioned genome, the **exact same model** approaches a brand-new unseen folder (`dataset_b`) and finishes in **2 steps · 0 errors · 58% fewer tokens**.
 
-| What You Experience | Ordinary Desktop Agents | ⚡ Harnex |
+| Dimension | Static Desktop Agents | ⚡ Harnex |
 | :--- | :--- | :--- |
-| **Out of the Box** | Bloated static prompts & pre-packed plugin clutter | **Clean, tiny seed** — grows only the skills your desktop actually needs |
-| **When Things Break** | Repeats the same error until you rewrite prompts | **Writes its own fix** — scripts, guidance & lessons verified in a shadow copy |
-| **During Execution** | Watch helplessly or kill the chat and start over | **Pause → Steer → Evolve** — one mid-run correction trains the next version |
-| **Trust & Safety** | Scripts share your full user permissions & prompt injection sticks | **4-Layer Rust Vault** — real OS sandbox, SHA-256 hooks, isolated safety reviewer |
-| **Upgrade Risk** | Prompt tweaks silently break things that used to work | **Git Time-Travel** — diff every evolution, replay `v0` vs `v1`, auto-revert regressions |
+| **Starting Footprint** | Bloated static prompts & pre-packed plugin clutter | **Minimal clean seed** — evolves only what your workflows actually need |
+| **After Failures** | Repeats mistakes until a human edits prompts | **Authors its own fix** — scripts, guidance & lessons verified in a shadow copy |
+| **Mid-Run Control** | Watch passively or kill the thread and restart | **Pause → Steer → Evolve** — one mid-flight correction feeds the next generation |
+| **Desktop Security** | Scripts inherit full user privileges; prompt injections persist | **4-Layer Rust Security Core** — OS physical sandbox, SHA-256 hooks, isolated Guardian AI |
+| **Upgrade Safety** | Prompt edits silently break previously working tasks | **Git Version Baseline** — diff every evolution, replay `v0` vs `v1`, auto-revert regressions |
 
 ---
 
 ## Meet the Command Deck
 
 <div align="center">
-  <img src="assets/command-deck-preview.png" alt="Harnex Command Deck Desktop UI" width="96%" />
+  <img src="assets/ui-command-deck-en.png" alt="Harnex Command Deck Desktop UI (Real Build Screenshot)" width="100%" />
 </div>
 
 <br />
@@ -66,63 +66,63 @@ Most desktop AI agents are **amnesiacs**. When an agent trips over messy local f
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>⏸ Pause Mid-Run. Teach It Once.</h3>
-      Notice the agent drifting off course? Hit <strong>Pause</strong>, type a quick course correction, and hit <strong>Resume</strong>. Harnex finishes your task immediately—and automatically queues your steer as a high-signal training cue for background evolution.
+      <h3>⏸ Pause Mid-Run. Steer Into Evolution.</h3>
+      Notice the agent drifting off course? Click <strong>Pause</strong>, provide a brief correction, and hit <strong>Resume</strong>. Harnex finishes your active task immediately—and automatically tags your steer as a high-signal cue for background evolution.
     </td>
     <td width="50%" valign="top">
       <h3>🔬 Live Evolution Theater — Zero Black-Box Magic</h3>
-      Watch proposals form in real time, see agent-authored scripts verified inside a shadow copy, and inspect the shuffled <strong>Blind Judge A/B</strong> verdict. Want to tweak an evolved script? Leave an <strong>inline comment on any Diff line</strong> to trigger targeted re-evolution.
+      Inspect dual-track proposals, live shadow-sandbox metrics (steps, errors, latency, cost), and the shuffled <strong>Blind Judge A/B</strong> verdict. Want to refine an evolved script? Leave an <strong>inline comment on any Diff line</strong> to trigger targeted re-evolution.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3>⏪ Git Time-Travel & Shareable Agent Genomes</h3>
-      Every evolution is an atomic commit managed by embedded <code>libgit2</code>. Replay any past task on <code>v0</code> vs <code>v1</code> using the exact same model to see the leap, roll back in one click, or export a secret-scanned genome pack to share with the community.
+      Every accepted change is committed atomically via embedded <code>libgit2</code>. Replay any task on <code>v0</code> vs <code>v1</code> using the exact same model, roll back in one click, or export a secret-scanned genome pack (imported third-party assets start untrusted).
     </td>
     <td width="50%" valign="top">
-      <h3>🔌 Bring Your Own Models in 10 Seconds</h3>
-      Assign different models to <strong>Solver</strong> (fast), <strong>Improver</strong> (reasoning), and <strong>Judge</strong> slots across OpenAI-compatible, Anthropic, Gemini, DeepSeek, or local Ollama—or import existing providers in one click from <strong>CC Switch</strong> & <strong>Magpie</strong>.
+      <h3>🔌 Multi-Slot Routing & One-Click Import</h3>
+      Bind distinct models to <strong>Solver</strong>, <strong>Improver</strong>, and <strong>Judge</strong> slots across OpenAI-compatible, Anthropic, Gemini, DeepSeek, or local Ollama—or import existing endpoints read-only from <strong>CC Switch</strong> & local <strong>Magpie</strong> gateways.
     </td>
   </tr>
 </table>
 
 ---
 
-## Built Like a Vault: Why You Can Trust It on Your Real Desktop
+## Rust-Enforced Security: Built for Real Desktops
 
 <div align="center">
-  <img src="assets/evolution-loop.png" alt="Armored Rust Vault Enclosing the Self-Evolving Harness² Engine" width="92%" />
+  <img src="assets/evolution-loop.png" alt="Rust OS Security Enclosure & Harness² Recursive Engine" width="92%" />
 </div>
 
-Giving an AI agent the ability to evolve itself sounds scary—until you lock the execution floor in Rust. Harnex keeps the agent's brain adaptable while locking every real-world side effect inside a **4-layer Codex-inspired security vault**:
+Self-evolution requires rock-solid containment. Harnex keeps reasoning and harness synthesis flexible in TypeScript while locking every real-world side effect inside a **4-layer Codex-inspired Rust security architecture**:
 
-1. **Real OS-Level Sandbox (`macOS Seatbelt` / `Linux bubblewrap & Landlock`)**: Every file write, shell command, and agent-authored script runs inside a real OS sandbox enforced by Rust—physically blocked from touching your SSH keys, system files, or Harnex's own security rules.
-2. **Smart Trust — Zero Alert Fatigue**: MCP servers you install work seamlessly without popups. Hooks require one-time trust and are fingerprinted with **SHA-256** (if a hook ever changes by even 1 byte, trust invalidates immediately).
-3. **Isolated Safety Reviewer (`auto` mode)**: An independent Guardian AI reviews risky commands in a clean context that *never* sees untrusted web pages or external files—shutting down prompt injection. Core instructions and executable code *always* require your explicit trust before taking effect.
-4. **System Keychain, Spend Limits & Auto-Rollback**: API keys stay exclusively in your OS native keychain; daily spending enforces a hard Rust circuit breaker; if a new evolved version ever degrades success rates, embedded `libgit2` automatically rolls back to the last healthy version.
+1. **OS-Level Physical Sandbox (`macOS Seatbelt` / `Linux bubblewrap & Landlock`)**: Every file write, terminal command, and agent-authored script executes inside a real OS sandbox enforced by Rust—physically isolated from SSH keys, system files, and Harnex's own security guardrails.
+2. **Low-Friction Trust Model (MCP Default Trust · Hook SHA-256 Pinning)**: MCP servers you install run seamlessly without popups. Hooks use Trust-on-First-Use + **SHA-256** fingerprinting—silent when unchanged, and immediately invalidated if a single byte changes.
+3. **Context-Isolated Safety Reviewer (`auto` mode Guardian AI)**: Under automatic mode, out-of-policy commands are reviewed by an independent Guardian AI in a clean context isolated from untrusted web pages and external files—preventing prompt injection. High-privilege edits (`scripts/`, `hooks/`, `mcp/servers.json`, core prompts) *always* require explicit human trust.
+4. **System Keychain, Spend Limits & Auto-Rollback**: API keys stay exclusively in your OS native keychain; Rust enforces hard daily spending caps; embedded `libgit2` monitors per-domain reliability and automatically rolls back degraded evolutions.
 
-### How the Self-Evolution Loop Works
+### Dual-Layer Self-Evolution Loop
 
 ```mermaid
 flowchart LR
-    RUN["1. Task Run (Pinned Version)"] -->|"Error or Pause + Steer"| PROP["2. Dual-Track Propose"]
+    RUN["1. Task Run (Pinned Commit)"] -->|"Error or Pause + Steer"| PROP["2. Dual-Track Propose"]
     PROP --> PROBE["3. Shadow OS Sandbox Probe"]
     PROBE --> JUDGE["4. Blind A/B Judge"]
-    JUDGE -->|"No Real Gain"| DROP["Silent Archive"]
+    JUDGE -->|"No Real Gain"| DROP["Silent Archive (NO_ENTRY)"]
     JUDGE -->|"Clear Win + Regression Pass"| TRIAGE["5. Triage Review + Trust Gate"]
     TRIAGE -->|"Commit + Distill Lesson"| LIB["6. Reusable Skills & Experience"]
     LIB -.->|"Accelerates Future Tasks"| PROP
 ```
 
-> Curious about the deep engineering details (`L0/L1/L2` boundaries, `BUN_BE_BUN=1` single-binary sandboxing, snapshot pinning, and minimum model specs)? Read the full [Architecture Deep Dive](docs/ARCHITECTURE.md).
+> Interested in the full `L0/L1/L2` boundary model, `BUN_BE_BUN=1` single-binary sandboxing, snapshot pinning, and minimum model recommendations? Read the [Architecture Deep Dive](docs/ARCHITECTURE.md).
 
 ---
 
-## Honest 3-Minute First-Run Experience & Platform Support
+## Honest Dual-Mode First-Run Crucible & Platform Matrix
 
-No blank chat box on launch, and no fake magic:
-- **🎬 Recorded Replay Mode (Default, Zero API Key)**: Launch Harnex and immediately watch a real pre-recorded `v0 → v1` evolution on messy multi-encoding desktop files—transparently labeled as a recorded trace.
-- **⚡ Live Evolution Mode (After Adding Your Key)**: See estimated runtime and token cost up front, then run live self-evolution across `dataset_a` and unseen `dataset_b` using your own model provider.
+No blank chat box on launch, and no fabricated demos:
+- **🎬 Recorded Replay Mode (Default, Zero API Key)**: Launch Harnex and immediately step through a real pre-recorded `v0 → v1` evolution on messy multi-encoding desktop files—transparently labeled as a recorded trace.
+- **⚡ Live Evolution Mode (After Connecting a Provider)**: See estimated runtime and token cost up front, then run live self-evolution across `dataset_a` and unseen `dataset_b` using your own model provider.
 
 | Platform | Support Tier | OS Sandbox Mechanism | Keyring Storage |
 | :--- | :--- | :--- | :--- |
@@ -132,9 +132,9 @@ No blank chat box on launch, and no fake magic:
 
 ---
 
-## Born Small, Co-Created Openly
+## Minimal Core, Open Co-Creation
 
-Harnex V1.0 stays lean and auditable on purpose. Rather than bloating the core with guesswork features, we publish 6 open blueprints in [docs/EVOLUTION_BLUEPRINTS.md](docs/EVOLUTION_BLUEPRINTS.md) for community voting and self-evolved contributions:
+Harnex V1.0 stays lean and auditable on purpose. Rather than bloating the core with speculative subsystems, we publish 6 open blueprints in [docs/EVOLUTION_BLUEPRINTS.md](docs/EVOLUTION_BLUEPRINTS.md) for community voting and self-evolved contributions:
 
 1. **Hierarchical & Vector Memory** — tiered compaction & local SQLite semantic retrieval
 2. **Community Hook Registry** — curated safety, PII-redaction & auto-fix hooks with test fixtures
