@@ -1,0 +1,10 @@
+Harnex
+Copyright 2026 Harnex Contributors
+
+This product includes software and architectural designs derived from
+google-research/harness2 (https://github.com/google-research/harness2),
+Copyright 2026 Google LLC, licensed under the Apache License, Version 2.0.
+
+Ported and adapted components in `packages/evolution/` retain the upstream
+Google LLC copyright notice and carry prominent modification notices in
+accordance with Section 4(b) of the Apache License, Version 2.0.
