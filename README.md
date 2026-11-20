@@ -1,11 +1,7 @@
 <div align="center">
 
 <p>
-  <img src="assets/hero-banner.png" alt="Harnex — Born Small. Grows Itself." width="100%" />
-</p>
-
-<p>
-  <img src="assets/logo.png" alt="Harnex App Icon" width="76" />
+  <img src="assets/banner.png" alt="Harnex — Born Small. Grows Itself." width="100%" />
 </p>
 
 <h3>A minimal immutable desktop shell with a self-evolving Harness² core — born small, grows itself.</h3>

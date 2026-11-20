@@ -1,11 +1,7 @@
 <div align="center">
 
 <p>
-  <img src="assets/hero-banner.png" alt="Harnex — Born Small. Grows Itself." width="100%" />
-</p>
-
-<p>
-  <img src="assets/logo.png" alt="Harnex Logo" width="76" />
+  <img src="assets/banner.png" alt="Harnex — Born Small. Grows Itself." width="100%" />
 </p>
 
 <h3>极简不可变安全桌面外壳 + 指数级自进化 Harness² 内核 —— 出厂极小，自我生长。</h3>
