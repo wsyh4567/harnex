@@ -1,0 +1,11 @@
+{
+  "id": "task-04-log-triage",
+  "domain": "log_triage",
+  "title": "Multi-service error log triage and endpoint summary",
+  "prompt": "Analyze fixtures/app.log and write output/triage_report.json with { totalErrors, byCode, topEndpoint }.",
+  "expectedOutputs": ["output/triage_report.json"],
+  "assertions": {
+    "totalErrors": 4,
+    "topEndpoint": "/api/v1/checkout"
+  }
+}

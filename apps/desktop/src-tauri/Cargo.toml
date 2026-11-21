@@ -1,0 +1,59 @@
+[package]
+name = "harnex-desktop"
+version = "0.1.0"
+description = "Harnex immutable L0 desktop shell and security gateway"
+authors = ["Harnex Contributors"]
+license = "Apache-2.0"
+edition = "2021"
+
+[lib]
+name = "harnex_l0"
+path = "src/lib.rs"
+
+[[bin]]
+name = "harnex-desktop"
+path = "src/main.rs"
+
+[[test]]
+name = "l0_processes"
+path = "tests/l0_processes.rs"
+harness = false
+
+[dependencies]
+cap-fs-ext = "4"
+cap-std = "4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+semver = "1.0"
+tokio = { version = "1", features = ["full"] }
+git2 = "0.20"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1.11"
+thiserror = "2.0"
+uuid = { version = "1.16", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tauri = { version = "2.5", optional = true, features = ["tray-icon"] }
+tempfile = "3.19"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", features = ["async-secret-service", "tokio", "crypto-rust"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Isolation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+[build-dependencies]
+tauri-build = { version = "2.2", optional = true }
+
+[features]
+default = []
+tauri-runtime = ["dep:tauri", "dep:tauri-build"]

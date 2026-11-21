@@ -1,0 +1,2 @@
+Invoice #A-1001
+Total: CNY 850.00

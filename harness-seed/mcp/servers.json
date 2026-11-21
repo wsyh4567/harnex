@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "servers": [
+    {
+      "id": "playwright",
+      "name": "Playwright Browser Automation",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"],
+      "env": {},
+      "origin": "seed_template",
+      "description": "Plug-and-play Playwright MCP server example. Enable in F4/MCP settings to use; user-enabled MCP servers are trusted by default, while RSI-proposed edits to mcp/servers.json always require explicit human trust."
+    }
+  ]
+}

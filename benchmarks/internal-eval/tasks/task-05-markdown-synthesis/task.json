@@ -1,0 +1,10 @@
+{
+  "id": "task-05-markdown-synthesis",
+  "domain": "synthesis",
+  "title": "Sprint retrospective markdown action-item synthesis",
+  "prompt": "Combine action items from fixtures/retro_a.md and fixtures/retro_b.md into output/action_items.md, deduplicating identical items and ordering P0 before P1 before P2.",
+  "expectedOutputs": ["output/action_items.md"],
+  "assertions": {
+    "requiredOrder": ["P0", "P1", "P2"]
+  }
+}

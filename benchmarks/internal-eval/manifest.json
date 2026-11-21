@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "suite": "harnex-internal-eval",
+  "version": "0.1.0",
+  "description": "12 lightweight deterministic desktop tasks for regression testing and Gate 2 multi-model calibration.",
+  "tasks": [
+    {
+      "id": "task-01-file-ops-dedup",
+      "dir": "tasks/task-01-file-ops-dedup",
+      "domain": "file_ops",
+      "title": "Desktop folder deduplication and index generation"
+    },
+    {
+      "id": "task-02-encoding-repair",
+      "dir": "tasks/task-02-encoding-repair",
+      "domain": "encoding",
+      "title": "GB18030 / UTF-8 mixed CSV encoding repair"
+    },
+    {
+      "id": "task-03-csv-json-reconcile",
+      "dir": "tasks/task-03-csv-json-reconcile",
+      "domain": "reconciliation",
+      "title": "Orders CSV vs Payments JSON discrepancy reconciliation"
+    },
+    {
+      "id": "task-04-log-triage",
+      "dir": "tasks/task-04-log-triage",
+      "domain": "log_triage",
+      "title": "Multi-service error log triage and endpoint summary"
+    },
+    {
+      "id": "task-05-markdown-synthesis",
+      "dir": "tasks/task-05-markdown-synthesis",
+      "domain": "synthesis",
+      "title": "Sprint retrospective markdown action-item synthesis"
+    },
+    {
+      "id": "task-06-script-extraction",
+      "dir": "tasks/task-06-script-extraction",
+      "domain": "scripting",
+      "title": "Extract reusable Bun telemetry parser script"
+    },
+    {
+      "id": "task-07-safety-refusal-secrets",
+      "dir": "tasks/task-07-safety-refusal-secrets",
+      "domain": "safety",
+      "title": "Prompt-injection resistance in untrusted vendor email"
+    },
+    {
+      "id": "task-08-json-schema-migration",
+      "dir": "tasks/task-08-json-schema-migration",
+      "domain": "file_ops",
+      "title": "Contacts JSON v1-to-v2 schema migration"
+    },
+    {
+      "id": "task-09-config-diff-audit",
+      "dir": "tasks/task-09-config-diff-audit",
+      "domain": "config",
+      "title": "Staging vs Production config drift audit with secret masking"
+    },
+    {
+      "id": "task-10-invoice-tax-calc",
+      "dir": "tasks/task-10-invoice-tax-calc",
+      "domain": "reconciliation",
+      "title": "Multi-tier VAT invoice calculation"
+    },
+    {
+      "id": "task-11-archive-changelog",
+      "dir": "tasks/task-11-archive-changelog",
+      "domain": "synthesis",
+      "title": "Conventional commits to grouped CHANGELOG.md"
+    },
+    {
+      "id": "task-12-sandbox-boundary-guard",
+      "dir": "tasks/task-12-sandbox-boundary-guard",
+      "domain": "safety",
+      "title": "Immutable L0 path protection refusal check"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "task-06-script-extraction",
+  "domain": "scripting",
+  "title": "Extract reusable Bun telemetry parser script",
+  "prompt": "Write a reusable Bun TypeScript script at output/parse_metrics.ts that parses fixtures/telemetry.txt and writes output/metrics.json with { count, avgLatencyMs, maxLatencyMs }.",
+  "expectedOutputs": ["output/parse_metrics.ts", "output/metrics.json"],
+  "assertions": {
+    "count": 4,
+    "avgLatencyMs": 125,
+    "maxLatencyMs": 220
+  }
+}

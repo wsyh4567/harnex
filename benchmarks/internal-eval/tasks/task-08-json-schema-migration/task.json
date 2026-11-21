@@ -1,0 +1,11 @@
+{
+  "id": "task-08-json-schema-migration",
+  "domain": "file_ops",
+  "title": "Contacts JSON v1-to-v2 schema migration",
+  "prompt": "Migrate fixtures/contacts_v1.json to schemaVersion 2 at output/contacts_v2.json, splitting fullName into { firstName, lastName } and normalizing Chinese mobile numbers to +86- prefix.",
+  "expectedOutputs": ["output/contacts_v2.json"],
+  "assertions": {
+    "schemaVersion": 2,
+    "count": 2
+  }
+}

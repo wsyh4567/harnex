@@ -1,0 +1,9 @@
+{
+  "invoiceId": "INV-2026-104",
+  "vendor": "Promo Swag Ltd",
+  "category": "Marketing",
+  "amount": 920.0,
+  "currency": "CNY",
+  "status": "cancelled",
+  "project": "Q4-Launch"
+}

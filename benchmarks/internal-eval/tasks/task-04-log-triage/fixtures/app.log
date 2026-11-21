@@ -1,0 +1,6 @@
+2026-11-19T10:00:01Z INFO  endpoint=/health status=200
+2026-11-19T10:01:12Z ERROR code=E_TIMEOUT endpoint=/api/v1/checkout msg="upstream timeout"
+2026-11-19T10:02:03Z ERROR code=E_TIMEOUT endpoint=/api/v1/checkout msg="upstream timeout"
+2026-11-19T10:03:45Z WARN  endpoint=/api/v1/profile msg="slow query"
+2026-11-19T10:04:11Z ERROR code=E_DB_CONN endpoint=/api/v1/checkout msg="pool exhausted"
+2026-11-19T10:05:22Z ERROR code=E_AUTH endpoint=/api/v1/token msg="expired jwt"

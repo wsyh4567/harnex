@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ts-packages:
+    name: TS Packages, Sidecar & Desktop UI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile || bun install
+      - name: Typecheck all TS packages
+        run: bun run typecheck
+      - name: Run all Bun unit tests
+        run: bun test
+      - name: Validate factory seed, datasets & internal eval suite
+        run: bun run validate:seed
+      - name: Build desktop frontend
+        run: bun run build:desktop
+      - name: Compile standalone Bun sidecar & verify BUN_BE_BUN=1
+        shell: bash
+        run: |
+          mkdir -p packages/sidecar/dist
+          bun build --compile packages/sidecar/src/index.ts --outfile packages/sidecar/dist/harnex-sidecar
+          echo 'const n: number = 42; console.log("ext-ok:" + n)' > /tmp/harnex_ext_check.ts
+          BUN_BE_BUN=1 ./packages/sidecar/dist/harnex-sidecar /tmp/harnex_ext_check.ts | grep -q "ext-ok:42"
+
+  rust-l0:
+    name: Rust L0 Core & Security Pentest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install Linux Tauri system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev pkg-config bubblewrap
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Run Rust L0 unit, process & l0_pentest tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+      - name: Verify Tauri desktop runtime compilation
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --features tauri-runtime

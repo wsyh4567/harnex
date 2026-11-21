@@ -1,0 +1,27 @@
+{
+  "name": "harnex-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "bun test packages/protocol packages/interfaces packages/runtime packages/evolution packages/sidecar apps/desktop",
+    "test:contracts": "bun test packages/protocol packages/interfaces",
+    "test:runtime": "bun test packages/runtime",
+    "test:evolution": "bun test packages/evolution",
+    "test:sidecar": "bun test packages/sidecar",
+    "test:desktop": "bun test apps/desktop",
+    "validate:seed": "bun run examples/first-run-challenge/validate_seed.ts && bun run benchmarks/internal-eval/evaluate.ts",
+    "build:sidecar": "bun build --compile packages/sidecar/src/index.ts --outfile packages/sidecar/dist/harnex-sidecar",
+    "build:desktop": "bun run --cwd apps/desktop build",
+    "dev:desktop": "bun run --cwd apps/desktop dev",
+    "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd packages/interfaces typecheck && bun run --cwd packages/runtime typecheck && bun run --cwd packages/evolution typecheck && bun run --cwd packages/sidecar typecheck"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.8.2"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "task-01-file-ops-dedup",
+  "domain": "file_ops",
+  "title": "Desktop folder deduplication and index generation",
+  "prompt": "Scan fixtures/inbox/, deduplicate identical content files (keep lexicographically earliest filename), categorize unique files into output/organized/{invoices,notes,archives}/, and write output/index.json with { uniqueCount, duplicateCount, categories }.",
+  "expectedOutputs": ["output/index.json"],
+  "assertions": {
+    "uniqueCount": 3,
+    "duplicateCount": 1
+  }
+}

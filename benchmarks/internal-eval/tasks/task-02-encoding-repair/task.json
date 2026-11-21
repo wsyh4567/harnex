@@ -1,0 +1,10 @@
+{
+  "id": "task-02-encoding-repair",
+  "domain": "encoding",
+  "title": "GB18030 / UTF-8 mixed CSV encoding repair",
+  "prompt": "Convert fixtures/legacy_gb18030.csv from GB18030 to clean UTF-8 (no BOM) at output/repaired.csv, preserving all Chinese site names without replacement characters.",
+  "expectedOutputs": ["output/repaired.csv"],
+  "assertions": {
+    "requiredSubstrings": ["杭州研发中心", "深圳供应链"]
+  }
+}

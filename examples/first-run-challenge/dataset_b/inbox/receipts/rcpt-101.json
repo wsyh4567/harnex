@@ -1,0 +1,9 @@
+{
+  "invoiceId": "INV-2026-101",
+  "vendor": "Skyline Air",
+  "category": "Travel",
+  "amountCents": 245000,
+  "currency": "CNY",
+  "status": "paid",
+  "project": "Q4-Launch"
+}

@@ -1,0 +1,100 @@
+{
+  "id": "onboarding-dataset-a-v0-to-v1",
+  "title": "Dataset A: Dirty GB18030 & UTF-8 BOM Billing Reconciliation (v0 -> v1)",
+  "isRecordedReplay": true,
+  "disclaimer": "Recorded Replay (No API Key Required): This is a genuine pre-recorded execution & Harness² evolution trace on examples/first-run-challenge/dataset_a. Configure an LLM provider in Settings to run Live Evolution.",
+  "recordedModel": "gemini-2.5-flash (Solver) + gemini-2.5-pro (Improver/Judge)",
+  "recordedAt": "2026-11-20T09:00:00.000Z",
+  "steps": [
+    {
+      "offsetMs": 0,
+      "stage": "task_start",
+      "title": "Task Started (Pinned: Genome v0)",
+      "detail": "Scanning examples/first-run-challenge/dataset_a/raw/ (3 CSV files: UTF-8 BOM, GB18030, dirty headers).",
+      "metrics": {
+        "steps": 1,
+        "errors": 0,
+        "durationMs": 420,
+        "tokens": 640,
+        "costUsd": 0.0004
+      }
+    },
+    {
+      "offsetMs": 1400,
+      "stage": "v0_failure",
+      "title": "v0 Failure: Garbled GB18030 & Broken Currency Parse",
+      "detail": "Factory seed read 2026-10-branch-east-gbk.csv as UTF-8, yielding replacement chars () for 华东云算力有限公司 and failing to parse accounting negative (180.00) and VOID rows (verify.ts: 3 errors).",
+      "metrics": {
+        "steps": 7,
+        "errors": 3,
+        "durationMs": 6840,
+        "tokens": 4120,
+        "costUsd": 0.0031
+      }
+    },
+    {
+      "offsetMs": 2600,
+      "stage": "steer_captured",
+      "title": "Human Pause -> Steer Captured",
+      "detail": "User paused execution and steered: 'Detect GB18030 vs UTF-8 BOM before parsing, ignore preamble lines and VOID rows, and convert USD at 7.20.' High-value Steer signal queued for Harness² evolution."
+    },
+    {
+      "offsetMs": 3900,
+      "stage": "evolution_propose",
+      "title": "Evolution Theater: Dual-Track Propose (INV + DOM)",
+      "detail": "Proposing scripts/safe_gbk_parse.ts (using TextDecoder('gb18030') + accounting-parentheses parser) and updating tool_descriptions/fs_and_shell.md with CSV encoding hygiene guidance."
+    },
+    {
+      "offsetMs": 5400,
+      "stage": "shadow_probe",
+      "title": "CoW Shadow Sandbox Probe: 0 Errors",
+      "detail": "Executed candidate harness in isolated Copy-on-Write shadow workspace via Rust L0 BUN_BE_BUN=1 sandbox. Steps dropped 7 -> 2, errors dropped 3 -> 0, token usage -54%.",
+      "metrics": {
+        "steps": 2,
+        "errors": 0,
+        "durationMs": 2150,
+        "tokens": 1890,
+        "costUsd": 0.0014
+      }
+    },
+    {
+      "offsetMs": 6800,
+      "stage": "blind_judge",
+      "title": "Blind Judge A/B Arena (Order-Consistent)",
+      "detail": "Shuffled Option A vs Option B evaluated in both forward and reverse order (seed: dataset_a_v1). Candidate won both passes with high confidence: clean GB18030 decoding, exact VOID filtering, deterministic script reuse."
+    },
+    {
+      "offsetMs": 8100,
+      "stage": "proposal_adopt",
+      "title": "Explicit Human Trust & Genome v1 Commit",
+      "detail": "scripts/safe_gbk_parse.ts flagged as high-privilege asset; user approved SHA-256 trust entry. Rust libgit2 committed Genome v1 and appended Cue/Lesson/Evidence to meta/domains/file_ops/EXPERIENCE.md."
+    },
+    {
+      "offsetMs": 9500,
+      "stage": "v1_replay_success",
+      "title": "v1 Replay Verified: 100% Accuracy",
+      "detail": "Re-ran dataset_a with Genome v1 on the same Solver model: verify.ts passed all assertions (9 valid rows, 2 VOID excluded, netTotalCny = 6156.00).",
+      "metrics": {
+        "steps": 2,
+        "errors": 0,
+        "durationMs": 2080,
+        "tokens": 1840,
+        "costUsd": 0.0013
+      }
+    }
+  ],
+  "v0Metrics": {
+    "steps": 7,
+    "errors": 3,
+    "durationMs": 6840,
+    "tokens": 4120,
+    "costUsd": 0.0031
+  },
+  "v1Metrics": {
+    "steps": 2,
+    "errors": 0,
+    "durationMs": 2080,
+    "tokens": 1840,
+    "costUsd": 0.0013
+  }
+}

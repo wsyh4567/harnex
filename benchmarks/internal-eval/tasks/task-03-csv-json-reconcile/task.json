@@ -1,0 +1,12 @@
+{
+  "id": "task-03-csv-json-reconcile",
+  "domain": "reconciliation",
+  "title": "Orders CSV vs Payments JSON discrepancy reconciliation",
+  "prompt": "Compare fixtures/orders.csv and fixtures/payments.json. Write output/discrepancies.json listing { unpaidOrderIds, overpaidOrderIds, matchedCount }.",
+  "expectedOutputs": ["output/discrepancies.json"],
+  "assertions": {
+    "unpaidOrderIds": ["ORD-102"],
+    "overpaidOrderIds": ["ORD-103"],
+    "matchedCount": 1
+  }
+}

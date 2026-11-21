@@ -1,0 +1,6 @@
+Exported by BillingSys v2 | Branch: South
+status,tx_date,id,supplier,dept_category,gross_amount,memo
+PAID,2026-10-09,SOUTH-201,Shenzhen Fiber Tech,Network,CNY 680.00,Dedicated uplink
+PAID,2026-10-22,SOUTH-202,South Bay Catering,Meals,"¥345.50",Team sprint dinner
+REFUND,2026-10-25,SOUTH-203,Shenzhen Fiber Tech,Network,(180.00),SLA rebate credit
+VOID,2026-10-28,SOUTH-204,Duplicate Entry,Misc,¥500.00,Voided duplicate

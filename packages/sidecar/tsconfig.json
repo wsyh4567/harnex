@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@harnex/*": ["../*/src/index.ts"],
+      "zod": ["../protocol/node_modules/zod"]
+    }
+  },
+  "include": ["src/**/*", "tests/**/*"]
+}

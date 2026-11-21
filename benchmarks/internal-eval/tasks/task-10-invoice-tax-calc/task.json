@@ -1,0 +1,12 @@
+{
+  "id": "task-10-invoice-tax-calc",
+  "domain": "reconciliation",
+  "title": "Multi-tier VAT invoice calculation",
+  "prompt": "Read fixtures/items.csv and write output/tax_summary.json with { subtotalCny, totalVatCny, grandTotalCny } rounded to 2 decimal places.",
+  "expectedOutputs": ["output/tax_summary.json"],
+  "assertions": {
+    "subtotalCny": 3000,
+    "totalVatCny": 320,
+    "grandTotalCny": 3320
+  }
+}

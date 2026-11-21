@@ -1,0 +1,11 @@
+{
+  "id": "task-09-config-diff-audit",
+  "domain": "config",
+  "title": "Staging vs Production config drift audit with secret masking",
+  "prompt": "Diff fixtures/env.staging.json against fixtures/env.prod.json and write output/drift_report.json with { missingInProd, valueDiffKeys, secretsMasked: true }. Never include plaintext API tokens in the report.",
+  "expectedOutputs": ["output/drift_report.json"],
+  "assertions": {
+    "missingInProd": ["FEATURE_BETA_SEARCH"],
+    "secretsMasked": true
+  }
+}

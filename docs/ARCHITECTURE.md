@@ -93,3 +93,54 @@ Harnex separates LLM responsibilities into three configurable slots (`ModelSlotS
 | **`solver`** | Foreground task execution (`Ask` / `Plan` / `Craft`) | Fast tool-calling model (e.g., Gemini 2.5 Flash, GPT-4o-mini, Claude Haiku, DeepSeek Chat) | Harness² is designed to amplify fast, economical Solver models (`v0 -> v1`). |
 | **`improver`** | Contrastive trace diagnosis & patch generation | Mid-to-high reasoning model (e.g., Gemini 2.5 Pro, Claude Sonnet, o3-mini / GPT-4.1) | Needs reliable code/diff synthesis and adherence to `SurfaceSpec` constraints. |
 | **`judge`** | Blind Judge A/B evaluation & `auto`-mode Guardian AI | Mid-to-high reasoning model, **heterogeneous from `improver` recommended** | Using a different model family than `improver` reduces self-preference bias in A/B selection. |
+
+---
+
+## 6. Upstream Auto-Updater, User Genome Isolation & Breaking-Change Protection Protocol
+
+Harnex guarantees that upstream binary updates **never clobber** a user's evolved intelligence, trust decisions, or execution history.
+
+### 6.1 Strict Binary vs. Genome Separation
+
+| Surface | Replaced by App Update? | Lifecycle & Ownership |
+| :--- | :--- | :--- |
+| **L0 Rust Shell + Embedded Bun Sidecar + Desktop UI Binary** | **Yes** | Immutable application payload distributed via signed releases. |
+| **`~/.harnex/harness/`** (User-evolved Git repository) | **Never** | `harness-seed/` only initializes an empty repository on first launch. Existing genomes are preserved across upgrades and downgrades. |
+| **`~/.harnex/trust.json`** & **SQLite Traces** | **Never** | Trust digests, `ExecPolicy` rules, and run traces remain strictly under local user control. |
+
+### 6.2 Release Compatibility Classification (`compatLevel`)
+
+Every upstream release manifest declares a `compatLevel` so the updater surfaces exact impact before installation:
+
+| `compatLevel` | Impact | Update Behavior |
+| :--- | :--- | :--- |
+| **`safe`** | Zero schema or runtime contract impact | Eligible for normal install after signature and SHA-256 verification. |
+| **`auto_migrate`** | Additive schema/metadata evolution | Runs an **idempotent forward schema migrator** on `manifest.json` and SQLite `schemaVersion` tables on first boot. |
+| **`breaking`** | Contract, API, or runtime behavior change affecting evolved assets | Requires explicit `migrationNotes` display and **human confirmation** before `updater_install` proceeds. |
+
+### 6.3 Mandatory Pre-Update Snapshot Tag & Backup
+
+Before `updater_install` executes any downloaded installer:
+1. **Installer Verification**: Rust L0 verifies the release signature and exact **SHA-256** digest of the downloaded payload.
+2. **Immutable Git Tag**: Rust `git2` creates an immutable annotated tag **`pre-update-vX.Y.Z-to-vA.B.C`** on the active `~/.harnex/harness/` `HEAD` commit.
+3. **State Backup**: Snapshots of `manifest.json`, `trust.json`, and SQLite metadata are written to **`~/.harnex/backups/`**.
+
+This guarantees **100% rollback safety**—even if a user downgrades the desktop binary back to `vX.Y.Z`, the exact pre-update genome and trust state remain intact and restorable.
+
+### 6.4 Quarantine + Harness² Self-Healing Migration for Breaking Changes
+
+```mermaid
+flowchart LR
+    UPD["Verified Upgrade (compatLevel: breaking)"] --> CHK["Startup Compatibility & Schema Check"]
+    CHK -->|Compatible Asset| OK["Active (Trusted SHA-256 Preserved)"]
+    CHK -->|Incompatible scripts/*.ts or hooks/*.ts| QUAR["Quarantine in TrustStore (disabled / needs_migration)"]
+    QUAR --> PROP["Harness² Migration Proposal (Evolution Triage)"]
+    PROP --> PROBE["CoW Shadow Probe + regression_cases.jsonl Check"]
+    PROBE --> REVIEW["Before/After Diff + Explicit Human Re-Trust"]
+    REVIEW -->|Adopted| ACTIVE["Re-Trusted & Committed via libgit2"]
+```
+
+- **Zero Silent Deletion**: Incompatible user `scripts/*.ts` or `hooks/*.ts` are **never deleted**; they are quarantined as `disabled / needs_migration` in `TrustStore` (`~/.harnex/trust.json`) so application startup never crash-loops.
+- **Harness² Self-Healing Migration**: Quarantined assets are queued into a Harness² **Migration Proposal** in Evolution Triage—repaired against the new contract, validated via CoW Shadow probe and `regression_cases.jsonl`, and presented with a **Before/After Diff** requiring explicit human re-trust before reactivation.
+- **Opt-In Upstream Seed Improvements**: New capabilities added to upstream `harness-seed/` are never force-applied; they are surfaced solely as **opt-in 3-way merge diffs** inside Evolution Triage.
+

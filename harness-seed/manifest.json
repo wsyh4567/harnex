@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "name": "harnex-seed",
+  "version": "0.1.0",
+  "description": "Factory minimal harness seed for Harnex — born small, grows itself.",
+  "health": {
+    "status": "healthy",
+    "consecutiveFailures": 0,
+    "lastEvaluatedAt": null,
+    "domainStats": {}
+  },
+  "components": {
+    "systemprompt": "systemprompt.md",
+    "guardrails": "guardrails.md",
+    "memory": "memory/LongTermMEMORY.md",
+    "tool_descriptions": "tool_descriptions/",
+    "skills": "skills/",
+    "scripts": "scripts/",
+    "hooks": "hooks/",
+    "sub_agents": "sub_agents/",
+    "mcp": "mcp/servers.json",
+    "sandbox_policies": "sandbox_policies/",
+    "views": "views/",
+    "meta": "meta/"
+  },
+  "highPrivilegePrefixes": [
+    "scripts/",
+    "hooks/",
+    "mcp/servers.json",
+    "systemprompt.md",
+    "guardrails.md"
+  ]
+}

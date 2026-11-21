@@ -1,0 +1,8 @@
+﻿# Exported from HQ ERP v4.2 - Internal Use Only
+# Generated: 2026-11-01 08:30:00
+Record_ID,Txn_Date,Vendor_Name,Category,Amount_Raw,Status,Notes
+HQ-001,2026-10-03,Alibaba Cloud,Cloud,"¥1,250.50",PAID,October compute cluster
+HQ-002,2026-10-07,Figma Inc,Software,$300.00,PAID,Design seats (USD)
+
+HQ-003,2026-10-12,Alibaba Cloud,Cloud,-¥200.00,REFUND,Credit memo for downtime
+HQ-004,2026-10-15,Test Sandbox Vendor,Misc,¥999.00,VOID,Cancelled test invoice

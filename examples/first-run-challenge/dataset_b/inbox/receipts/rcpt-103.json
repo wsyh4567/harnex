@@ -1,0 +1,9 @@
+{
+  "invoiceId": "INV-2026-103",
+  "vendor": "GPU Cloud Labs",
+  "category": "Compute",
+  "amount": 150.0,
+  "currency": "USD",
+  "status": "paid",
+  "project": "Infra-Core"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "task-11-archive-changelog",
+  "domain": "synthesis",
+  "title": "Conventional commits to grouped CHANGELOG.md",
+  "prompt": "Group commits in fixtures/commits.txt into output/CHANGELOG.md under sections '### Breaking Changes', '### Features', and '### Fixes'.",
+  "expectedOutputs": ["output/CHANGELOG.md"],
+  "assertions": {
+    "requiredSections": ["### Breaking Changes", "### Features", "### Fixes"]
+  }
+}
