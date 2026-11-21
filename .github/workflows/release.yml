@@ -1,0 +1,170 @@
+name: Release Desktop Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create or update (e.g. v0.1.0)"
+        required: false
+        default: "v0.1.0"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Desktop (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+            bundles: "nsis,msi"
+          - platform: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+            bundles: "dmg"
+          - platform: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+            bundles: "appimage,deb"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Linux Tauri & AppImage dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            pkg-config \
+            libfuse2 \
+            bubblewrap
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build standalone Bun sidecar binary
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/binaries
+          OUT="apps/desktop/src-tauri/binaries/harnex-sidecar-${{ matrix.target }}${{ matrix.ext }}"
+          bun build --compile packages/sidecar/src/index.ts --outfile "$OUT"
+          ls -lh "$OUT"
+
+      - name: Build Tauri 2 desktop installers
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          bunx @tauri-apps/cli@2 build \
+            --features tauri-runtime \
+            --config src-tauri/tauri.release.conf.json \
+            --bundles "${{ matrix.bundles }}"
+
+      - name: Collect installers for upload
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          BUNDLE_DIR="apps/desktop/src-tauri/target/release/bundle"
+          find "$BUNDLE_DIR" -maxdepth 2 -type f \
+            \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" \) \
+            -exec cp -v {} release-assets/ \;
+          ls -lh release-assets/
+          test -n "$(ls -A release-assets/)"
+
+      - name: Upload platform installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all platform installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        working-directory: dist-release
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            VERSION=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+            TAG="v${VERSION}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Harnex Desktop Release
+
+          Self-evolving AI agent desktop workspace powered by **Harness²**, **Rust L0 OS Sandbox**, and an embedded **Bun Sidecar**.
+
+          ### Installers
+          - **Windows (x64)**: `.exe` (NSIS) / `.msi`
+          - **macOS (Apple Silicon arm64)**: `.dmg`
+          - **Linux (x64)**: `.AppImage` / `.deb`
+
+          All installers include the standalone `harnex-sidecar` binary and factory `harness-seed` — no separate Node.js or Bun installation required.
+          Verify integrity using `SHA256SUMS.txt`.
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist-release/* --clobber
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" dist-release/* \
+              --title "Harnex ${TAG}" \
+              --notes-file release-notes.md \
+              --latest
+          fi

@@ -26,7 +26,7 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const DEFAULT_FEED: &str = "https://api.github.com/repos/harnex-ai/harnex/releases/latest";
+const DEFAULT_FEED: &str = "https://api.github.com/repos/wsyh4567/harnex/releases/latest";
 const MAX_ASSET: u64 = 512 * 1024 * 1024;
 const MAX_FEED: usize = 2 * 1024 * 1024;
 const CURRENT: &str = env!("CARGO_PKG_VERSION");

@@ -55,6 +55,7 @@ credentials*.json
 *.db
 .harnex/
 apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/
 
 # OS & IDE
 .DS_Store
