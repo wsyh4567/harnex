@@ -270,7 +270,7 @@ describe("Harness² offline parity", () => {
     const request = { threadId: params.threadId, workspacePath: host, prompt: "Operate on input", mode: "craft" as const, domain: params.domain, pinnedCommitSha: f.bridge.headSha };
     await expect(probeTask(f.runner, f.bridge, request, { touchedFiles: ["input.txt", ".\\input.txt"], effects: [{ kind: "external_message" }] })).resolves.toMatchObject({ mockedExternalEffects: true });
     expect(await readFile(join(host, "input.txt"), "utf8")).toBe("sample text");
-    expect(await readdir(host)).toEqual(["input.txt", "untouched.txt"]);
+    expect((await readdir(host)).sort()).toEqual(["input.txt", "untouched.txt"]);
     await expect(access(f.runner.runs[0]!.workspacePath)).rejects.toThrow();
     const small = { perFileBytes: 20, totalBytes: 10 };
     await expect(probeTask(f.runner, f.bridge, request, { touchedFiles: ["input.txt"], limits: small })).rejects.toBeInstanceOf(ShadowCapacityError);
