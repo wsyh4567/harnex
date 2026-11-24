@@ -5,10 +5,8 @@ import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
 import { SUPPORTED_LOCALES, useI18n } from "../../i18n/index.ts";
 import { cn } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
-import { ProvidersPanel } from "../providers/ProvidersPanel.tsx";
-import { SecurityCenterPanel } from "../security/SecurityCenterPanel.tsx";
 
-type SettingsTab = "general" | "providers" | "security" | "updates" | "crucible";
+type SettingsTab = "general" | "updates" | "crucible";
 
 export function SettingsView() {
   const {
@@ -41,8 +39,6 @@ export function SettingsView() {
           onChange={setTab}
           items={[
             { id: "general", label: t("settings.tabGeneral") },
-            { id: "providers", label: t("settings.tabProviders") },
-            { id: "security", label: t("settings.tabSecurity") },
             { id: "updates", label: t("settings.tabUpdates") },
             { id: "crucible", label: t("settings.tabCrucible") },
           ]}
@@ -50,8 +46,6 @@ export function SettingsView() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        {tab === "providers" && <ProvidersPanel />}
-        {tab === "security" && <SecurityCenterPanel />}
 
         {tab === "general" && (
           <div className="h-full overflow-y-auto p-6">

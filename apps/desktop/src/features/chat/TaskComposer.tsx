@@ -276,7 +276,7 @@ export function TaskComposer({
 
   return (
     <div className={cn("w-full", className)}>
-      <GlobalHookTrustBar />
+      {variant === "thread" && <GlobalHookTrustBar />}
 
       {/* Pause -> Steer -> Resume Control Bar (when thread is running or paused) */}
       {activeThread && (activeThread.status === "running" || activeThread.status === "paused") && (

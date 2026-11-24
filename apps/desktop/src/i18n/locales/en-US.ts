@@ -518,7 +518,7 @@ export const enUSMessages = {
 
   // Settings
   "settings.title": "Settings",
-  "settings.subtitle": "Appearance, language, providers, security hooks, updates, and onboarding.",
+  "settings.subtitle": "Appearance, language, shortcuts, updates, compatibility, and onboarding.",
   "settings.tabGeneral": "Appearance & Language",
   "settings.tabProviders": "Model Providers",
   "settings.tabSecurity": "Global Hooks & Security",

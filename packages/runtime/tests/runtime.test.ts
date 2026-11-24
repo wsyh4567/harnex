@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
@@ -15,6 +15,7 @@ import {
   RoutedLlmClient, SqliteTraceStore, createWorkerSpawner, dispatchHook, importCcSwitch, importMagpie,
   loadHooks, loadMcpServers, loadMemory, loadSandboxPolicies, loadSkills, loadSubagentProfile, truncateToolOutput,
 } from "../src/index.ts";
+import { applyTargetedEdits, runTool, toolsFor } from "../src/runner/tools.ts";
 
 const tmp: string[] = [];
 async function fixture() {
@@ -86,7 +87,7 @@ describe("foreground runner", () => {
     const llm = new MockLlmClient((input, index) => {
       if (index === 0) { expect(input.tools).toBeUndefined(); return answer("", [tool("shell", { command: "unexpected" })]); }
       if (index === 1 || index === 3) return answer();
-      expect(input.tools?.map(({ name }) => name)).toEqual(["read_file", "list_files", "set_goals"]);
+      expect(input.tools?.map(({ name }) => name)).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals"]);
       return answer("", [tool("read_file", { path: "data.txt" }), tool("read_file", { path: "../data.txt" }, "escape"),
         tool("set_goals", { goals: [{ id: "validate", title: "Check input", status: "completed" }] }),
         tool("write_file", { path: "bad.txt", content: "not written" })]);
@@ -205,7 +206,7 @@ describe("foreground runner", () => {
       expect(input.messages[0]?.content).toContain("Conversation summary");
       return answer();
     });
-    const runner = new ForegroundTaskRunner({ bridge, trace, llm, toolOutputLimit: 1200, compactAtTokens: 1000, contextMaxTokens: 2000 });
+    const runner = new ForegroundTaskRunner({ bridge, trace, llm, toolOutputLimit: 1200, compactAtTokens: 1300, contextMaxTokens: 2400 });
     // Leave the initial tool definitions below the threshold, then cross it with the tool turn.
     const result = await runner.runTask(request({ prompt: "X".repeat(180) }));
     expect(result).toMatchObject({ succeeded: true });
@@ -714,5 +715,78 @@ describe("harness slots", () => {
       await expect(host.listTools("disabled")).rejects.toThrow("MCP server unavailable");
       await expect(new McpHost(servers).listTools("example")).rejects.toThrow("requires an L0-managed transport");
     } finally { await host.close(); await server.close(); }
+  });
+});
+
+describe("Pi-aligned core tools (read pagination, edit_file, grep_files, find_files)", () => {
+  test("exposes read-only search tools in plan mode and edit_file in craft mode", () => {
+    expect(toolsFor("ask")).toEqual([]);
+    const planNames = toolsFor("plan").map((t) => t.name);
+    expect(planNames).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals"]);
+    const craftNames = toolsFor("craft").map((t) => t.name);
+    expect(craftNames).toContain("edit_file");
+    expect(craftNames).toContain("grep_files");
+    expect(craftNames).toContain("find_files");
+    expect(craftNames).toContain("shell");
+  });
+
+  test("applyTargetedEdits preserves BOM/CRLF, batches disjoint edits, and rejects ambiguous or overlapping edits", () => {
+    const src = "\uFEFFalpha\r\nbeta\r\ngamma\r\ndelta\r\n";
+    const res = applyTargetedEdits(src, [
+      { oldText: "alpha", newText: "ALPHA" },
+      { oldText: "gamma", newText: "GAMMA_1\nGAMMA_2" },
+    ]);
+    expect(res.content).toBe("\uFEFFALPHA\r\nbeta\r\nGAMMA_1\r\nGAMMA_2\r\ndelta\r\n");
+    expect(res.firstChangedLine).toBe(1);
+    expect(res.diffSummary).toContain("- alpha");
+    expect(res.diffSummary).toContain("+ ALPHA");
+
+    expect(() => applyTargetedEdits("foo\nfoo\n", [{ oldText: "foo", newText: "bar" }])).toThrow("multiple locations");
+    expect(() => applyTargetedEdits("abcdef", [
+      { oldText: "abcd", newText: "X" },
+      { oldText: "cdef", newText: "Y" },
+    ])).toThrow("Overlapping edits");
+  });
+
+  test("supports paginated read_file, workspace-safe find_files/grep_files, and L0-routed edit_file", async () => {
+    const dir = await fixture();
+    await mkdir(join(dir, "src"), { recursive: true });
+    await mkdir(join(dir, ".git"), { recursive: true });
+    await writeFile(join(dir, "src/app.ts"), "line1\nconst target = 42;\nline3\nline4\nline5\n");
+    await writeFile(join(dir, "src/bin.dat"), Buffer.from([0x00, 0x01, 0x02, 0x74, 0x61, 0x72, 0x67, 0x65, 0x74]));
+    await writeFile(join(dir, ".git/config"), "target = secret\n");
+
+    const bridge = new MockRustBridge();
+    const planReq = request({ workspacePath: dir, mode: "plan" });
+    const craftReq = request({ workspacePath: dir, mode: "craft" });
+
+    // Paginated read_file
+    const page = await runTool(tool("read_file", { path: "src/app.ts", offset: 2, limit: 2 }), planReq, {}, bridge, ["local"], 8000);
+    expect(page.status).toBe("completed");
+    expect(page.output).toContain("2: const target = 42;");
+    expect(page.output).toContain("3: line3");
+    expect(page.output).toContain("Use read_file with offset=4 to continue.");
+
+    // find_files skips .git and matches pattern
+    const found = await runTool(tool("find_files", { pattern: "*.ts" }), planReq, {}, bridge, ["local"], 8000);
+    expect(found.status).toBe("completed");
+    expect(found.output).toBe("src/app.ts");
+
+    // grep_files skips binary and .git
+    const grepped = await runTool(tool("grep_files", { query: "target" }), planReq, {}, bridge, ["local"], 8000);
+    expect(grepped.status).toBe("completed");
+    expect(grepped.output).toBe("src/app.ts:2: const target = 42;");
+
+    // edit_file is denied in plan mode
+    const denied = await runTool(tool("edit_file", { path: "src/app.ts", oldText: "42", newText: "99" }), planReq, {}, bridge, ["local"], 8000);
+    expect(denied.status).toBe("denied");
+
+    // edit_file in craft mode routes through Rust L0 execWriteFile (accepting legacy oldText/newText too)
+    const edited = await runTool(tool("edit_file", { path: "src/app.ts", oldText: "const target = 42;", newText: "const target = 99;" }), craftReq, {}, bridge, ["local"], 8000);
+    expect(edited.status).toBe("completed");
+    expect(edited.output).toContain("Applied 1 edit(s)");
+    expect(edited.changedFile?.path).toBe("src/app.ts");
+    expect(edited.changedFile?.content).toContain("const target = 99;");
+    expect(bridge.recordedCalls.some((c) => c.method === "execWriteFile")).toBe(true);
   });
 });

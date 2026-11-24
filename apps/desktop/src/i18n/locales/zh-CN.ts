@@ -520,7 +520,7 @@ export const zhCNMessages: Messages = {
 
   // 设置
   "settings.title": "设置",
-  "settings.subtitle": "外观主题、界面语言、模型供应商、全局 Hooks、自动更新与首启试炼场。",
+  "settings.subtitle": "外观主题、界面语言、快捷键、自动更新与首启试炼场。",
   "settings.tabGeneral": "外观与语言",
   "settings.tabProviders": "模型供应商",
   "settings.tabSecurity": "全局 Hooks 与安全",

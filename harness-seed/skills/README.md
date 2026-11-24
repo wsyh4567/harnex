@@ -1,6 +1,6 @@
 # Skills (`skills/*/SKILL.md`)
 
-Harnex starts with zero pre-loaded skills (`born small, grows itself`) and discovers skills from `skills/<skill-name>/SKILL.md` at startup.
+Harnex ships with 3 lean, pure-Markdown universal starter skills (`workspace-triage`, `safe-data-ops`, `verify-before-done`) loaded strictly on demand so day-1 tasks work smoothly without bloating always-on prompts. Domain-specific skills grow organically through Harness² evolution and unused skills can be pruned by the Harness Gardener.
 
 ## Contract
 1. Directory & file path: `skills/<name>/SKILL.md` (lowercase alphanumeric, `-`, `_`).

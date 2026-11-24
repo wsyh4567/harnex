@@ -13,6 +13,9 @@ test("factory seed with diverse slots reports clean hygiene and full health", as
     "guardrails.md",
     "memory/LongTermMEMORY.md",
     "tool_descriptions/fs_and_shell.md",
+    "skills/workspace-triage/SKILL.md",
+    "skills/safe-data-ops/SKILL.md",
+    "skills/verify-before-done/SKILL.md",
   ];
   const tree: HarnessTree = Object.fromEntries(
     await Promise.all(paths.map(async (path) => [path, await Bun.file(new URL(path, seed)).text()])),
