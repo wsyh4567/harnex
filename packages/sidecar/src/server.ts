@@ -8,7 +8,7 @@ import {
   ThreadCreateParamsSchema, ThreadDeleteParamsSchema, ThreadRenameParamsSchema, ThreadSchema,
   type AppConfig, type EvolutionProposal, type ProviderImportResult, type ReplayComparison, type Thread,
 } from "@harnex/protocol";
-import { EvolutionScheduler, inspectHarnessCompatibility, probeTask, withShadowWorkspace } from "@harnex/evolution";
+import { EvolutionScheduler, inspectHarnessCompatibility, inspectHarnessHygiene, probeTask, withShadowWorkspace } from "@harnex/evolution";
 import { ForegroundTaskRunner, importCcSwitch, importMagpie, ProviderRegistry, RoutedLlmClient, SqliteTraceStore } from "@harnex/runtime";
 import { z } from "zod";
 import { version as appVersion } from "../../../apps/desktop/src-tauri/tauri.conf.json";
@@ -387,6 +387,15 @@ export class SidecarServer {
         case "evolution.triage_list": return await this.trace.listProposals();
         case "evolution.silent_archive_count": return (await this.trace.listProposals(true)).filter(({ status }) => status === "archived_no_entry").length;
         case "evolution.check_compatibility": return await this.checkCompatibility();
+        case "evolution.gardener_report": {
+          const commitSha = await this.harness.getHeadSha();
+          const tree = await this.harness.readTreeAt(commitSha);
+          return inspectHarnessHygiene(tree, {
+            commitSha,
+            improverSlot: this.config.slots.improver,
+            judgeSlot: this.config.slots.judge,
+          });
+        }
         case "evolution.start_migration": {
           const { report, threadId, workspacePath } = migrationStart.parse(params);
           return await this.scheduler.triggerMigration({ report: report ?? await this.checkCompatibility(), threadId, workspacePath });

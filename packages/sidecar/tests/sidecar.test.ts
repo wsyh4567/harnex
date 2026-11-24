@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MockLlmClient, MockRustBridge, type LlmRequest, type LlmResponse } from "@harnex/interfaces";
 import {
-  AggregatedModelEntrySchema, EvolutionProposalSchema, HarnessCompatibilityReportSchema, OnboardingReplayTraceSchema,
+  AggregatedModelEntrySchema, EvolutionProposalSchema, HarnessCompatibilityReportSchema, HarnessGardenerReportSchema, OnboardingReplayTraceSchema,
   RpcErrorCode, type AppConfig, type EvolutionProposal, type GenomeCommit,
   type GitCommitPatchParams, type ModelPricing, type ProviderConfig, type RunnerEvent, type Thread,
 } from "@harnex/protocol";
@@ -400,6 +400,39 @@ test("supports thread.rename, thread.delete, evolution.architect_chat and action
     expect(ping.error).toContain("401");
   } finally { await app.close(); }
 }));
+
+test("returns a validated HarnessGardenerReport for evolution.gardener_report and flags same-model collusion", async () => {
+  const app = connect();
+  try {
+    const clean = HarnessGardenerReportSchema.parse(await app.call("evolution.gardener_report"));
+    expect(clean).toMatchObject({
+      commitSha: app.rust.headSha,
+      totalOrgans: Object.keys(initialTree).length,
+      alwaysOnEstimatedTokens: Math.ceil(
+        (Buffer.byteLength(initialTree["systemprompt.md"], "utf8") + Buffer.byteLength(initialTree[memory], "utf8")) / 4,
+      ),
+      modelDiversityOk: true,
+      healthScore: 100,
+      findings: [],
+    });
+
+    await app.call("provider.save", {
+      provider: { id: "shared-prov", name: "Shared", kind: "openai_compatible", baseUrl: "https://shared.test/v1", models: ["m1", "m2"] },
+      apiKey: "sk-shared",
+    });
+    await app.call("config.update", {
+      slots: {
+        improver: { providerId: "shared-prov", modelId: "m1" },
+        judge: { providerId: "shared-prov", modelId: "m1" },
+      },
+    });
+    const colluding = HarnessGardenerReportSchema.parse(await app.call("evolution.gardener_report"));
+    expect(colluding.modelDiversityOk).toBe(false);
+    expect(colluding.healthScore).toBe(95);
+    expect(colluding.findings).toMatchObject([{ kind: "same_model_collusion", path: "slots/improver+judge", severity: "advisory" }]);
+    expect(colluding.suggestedPruningGoal).toBeUndefined();
+  } finally { await app.close(); }
+});
 
 test("compiled sidecar reads fragmented NDJSON and returns the bundled replay from another working directory", () => fixture(async (root) => {
   const exe = join(root, "sidecar.exe"), src = resolve(import.meta.dir, "../src/index.ts");

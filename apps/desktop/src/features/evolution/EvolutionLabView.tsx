@@ -49,6 +49,8 @@ export function EvolutionLabView() {
     activeThreadId,
     setThreadMode,
     toggleSideChat,
+    pendingLabGoal,
+    consumePendingLabGoal,
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
 
@@ -102,6 +104,13 @@ export function EvolutionLabView() {
   useEffect(() => {
     setHighlightIdx(0);
   }, [trigger?.kind, trigger?.query]);
+
+  useEffect(() => {
+    if (!pendingLabGoal) return;
+    setGoalByPillar((prev) => ({ ...prev, [activeBp.id]: pendingLabGoal }));
+    setLabTab("guided");
+    consumePendingLabGoal();
+  }, [pendingLabGoal, activeBp.id, consumePendingLabGoal]);
 
   const executeOrInsertOption = (opt: CompletionOption) => {
     if (!trigger) return;

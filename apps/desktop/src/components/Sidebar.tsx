@@ -45,6 +45,7 @@ export function Sidebar() {
     deleteThread,
     proposals,
     pendingApprovals,
+    composerDrafts,
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
   const [threadFilter, setThreadFilter] = useState("");
@@ -230,6 +231,7 @@ export function Sidebar() {
                 const active = activePage === "thread" && th.id === activeThreadId;
                 const isRenaming = renamingId === th.id;
                 const displayTitle = localizeThreadTitle(th, locale);
+                const hasDraft = (composerDrafts[th.id] ?? "").trim().length > 0;
 
                 if (isRenaming) {
                   return (
@@ -283,11 +285,21 @@ export function Sidebar() {
                           />
                           <span className="truncate text-xs font-medium">{displayTitle}</span>
                         </span>
-                        {th.hadHumanSteer && (
-                          <span className="shrink-0 rounded bg-violet-500/12 px-1.5 py-0.5 text-[9px] font-medium text-violet-700 dark:text-violet-300">
-                            {t("rail.steerBadge")}
-                          </span>
-                        )}
+                        <span className="flex shrink-0 items-center gap-1">
+                          {hasDraft && (
+                            <span
+                              data-testid={`thread-draft-badge-${th.id}`}
+                              className="rounded bg-amber-500/12 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                            >
+                              {t("nav.draftBadge")}
+                            </span>
+                          )}
+                          {th.hadHumanSteer && (
+                            <span className="rounded bg-violet-500/12 px-1.5 py-0.5 text-[9px] font-medium text-violet-700 dark:text-violet-300">
+                              {t("rail.steerBadge")}
+                            </span>
+                          )}
+                        </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--hx-text-3)]">
                         <span>{formatRelativeTime(th.updatedAt, locale)}</span>

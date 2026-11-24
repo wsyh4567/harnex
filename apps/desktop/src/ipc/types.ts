@@ -19,6 +19,7 @@ import type {
   GlobalHookItem,
   GuardianDecision,
   HarnessCompatibilityReport,
+  HarnessGardenerReport,
   ImportPreview,
   ModelPricing,
   OnboardingReplayTrace,
@@ -153,6 +154,7 @@ export interface HarnexIpcClient {
   rejectProposal(params: EvolutionProposalActionParams): Promise<EvolutionProposal>;
   checkHarnessCompatibility(): Promise<HarnessCompatibilityReport>;
   startHarnessMigration(report?: HarnessCompatibilityReport): Promise<EvolutionProposal>;
+  getGardenerReport(): Promise<HarnessGardenerReport>;
 
   // F4: Genome Deck (Git, Component Browser, Replay Compare, Export/Import)
   listCommits(): Promise<GenomeCommit[]>;

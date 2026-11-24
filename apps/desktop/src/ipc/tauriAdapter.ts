@@ -6,6 +6,7 @@ import {
   GenomeFileSchema,
   GlobalHookItemSchema,
   HarnessCompatibilityReportSchema,
+  HarnessGardenerReportSchema,
   ImportPreviewSchema,
   OnboardingReplayTraceSchema,
   PricingSyncResultSchema,
@@ -32,6 +33,7 @@ import {
   type GlobalHookItem,
   type GuardianDecision,
   type HarnessCompatibilityReport,
+  type HarnessGardenerReport,
   type ImportPreview,
   type OnboardingReplayTrace,
   type PricingSyncParams,
@@ -287,6 +289,11 @@ export class TauriIpcAdapter implements HarnexIpcClient {
   async startHarnessMigration(report?: HarnessCompatibilityReport): Promise<EvolutionProposal> {
     const raw = await this.rpc<unknown>("evolution.start_migration", { report });
     return EvolutionProposalSchema.parse(raw);
+  }
+
+  async getGardenerReport(): Promise<HarnessGardenerReport> {
+    const raw = await this.rpc<unknown>("evolution.gardener_report", {});
+    return HarnessGardenerReportSchema.parse(raw);
   }
 
   listCommits(): Promise<GenomeCommit[]> {

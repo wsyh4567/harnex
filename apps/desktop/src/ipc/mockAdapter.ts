@@ -14,11 +14,13 @@ import type {
   EvolutionTriggerParams,
   ExecPolicyRule,
   ExportScanResult,
+  GardenerFinding,
   GenomeCommit,
   GenomeFile,
   GlobalHookItem,
   GuardianDecision,
   HarnessCompatibilityReport,
+  HarnessGardenerReport,
   ImportPreview,
   OnboardingReplayTrace,
   PricingSyncParams,
@@ -950,6 +952,177 @@ export class MockIpcAdapter implements HarnexIpcClient {
     this.proposals = [proposal, ...this.proposals];
     this.emit({ type: "evolution.proposal_ready", proposal });
     return proposal;
+  }
+
+  async getGardenerReport(): Promise<HarnessGardenerReport> {
+    const headSha = this.commits[0]?.sha ?? this.systemHealth.activeCommitSha;
+    const files = this.genomeTrees[headSha] ?? [];
+
+    const alwaysOnFiles = files.filter(
+      (f) =>
+        f.path === "systemprompt.md" ||
+        f.path === "guardrails.md" ||
+        f.path.startsWith("memory/") ||
+        f.path.startsWith("tool_descriptions/"),
+    );
+    const alwaysOnBytes = alwaysOnFiles.reduce((sum, f) => sum + f.content.length, 0);
+    const alwaysOnEstimatedTokens = Math.ceil(alwaysOnBytes / 4);
+
+    const referenceCorpus = files
+      .filter(
+        (f) =>
+          f.path === "systemprompt.md" ||
+          f.path === "guardrails.md" ||
+          f.path.startsWith("memory/") ||
+          f.path.startsWith("tool_descriptions/"),
+      )
+      .map((f) => f.content.toLowerCase())
+      .join("\n");
+
+    const fullReferenceCorpus = files
+      .filter((f) => !f.path.startsWith("scripts/"))
+      .map((f) => f.content.toLowerCase())
+      .join("\n");
+
+    const findings: GardenerFinding[] = [];
+
+    // 1. Prompt bloat check on always-on context
+    if (alwaysOnEstimatedTokens > 2500) {
+      findings.push({
+        id: "gardener-prompt-bloat",
+        kind: "prompt_bloat",
+        severity: "warning",
+        path: "systemprompt.md",
+        detail: `Always-on prompt footprint reached ~${alwaysOnEstimatedTokens} tokens (${alwaysOnBytes} B); consider moving domain rules into lazy skills.`,
+        suggestedAction: "prune",
+      });
+    }
+
+    // 2. Empty organ check
+    for (const file of files) {
+      if (file.content.trim().length === 0) {
+        findings.push({
+          id: `gardener-empty-${file.path}`,
+          kind: "empty_organ",
+          severity: "advisory",
+          path: file.path,
+          detail: "Organ file is empty and adds noise to the Genome tree.",
+          suggestedAction: "prune",
+        });
+      }
+    }
+
+    // 3. Untriggered skill check (skills/*/SKILL.md not referenced in always-on prompts/tool guides)
+    for (const file of files) {
+      if (file.path.startsWith("skills/") && file.path.endsWith("/SKILL.md")) {
+        const skillFolder = file.path.slice("skills/".length, -"/SKILL.md".length).toLowerCase();
+        const skillSlug = skillFolder.replace(/_/g, "-");
+        const isReferenced =
+          referenceCorpus.includes(file.path.toLowerCase()) ||
+          referenceCorpus.includes(skillFolder) ||
+          referenceCorpus.includes(skillSlug);
+        if (!isReferenced) {
+          findings.push({
+            id: `gardener-untriggered-${skillFolder}`,
+            kind: "untriggered_skill",
+            severity: "advisory",
+            path: file.path,
+            detail: `Skill "${skillFolder}" is not mentioned in systemprompt.md or tool descriptions and may stay dormant.`,
+            suggestedAction: "trigger",
+          });
+        }
+      }
+    }
+
+    // 4. Orphan script check (scripts/* not referenced by any skill, hook, tool guide, or experience)
+    for (const file of files) {
+      if (file.path.startsWith("scripts/")) {
+        const scriptName = file.path.slice("scripts/".length).toLowerCase();
+        if (
+          !fullReferenceCorpus.includes(file.path.toLowerCase()) &&
+          !fullReferenceCorpus.includes(scriptName)
+        ) {
+          findings.push({
+            id: `gardener-orphan-${file.path}`,
+            kind: "orphan_script",
+            severity: "advisory",
+            path: file.path,
+            detail: "Script is unreferenced across prompts, skills, tool guides, and distilled experience.",
+            suggestedAction: "prune",
+          });
+        }
+      }
+    }
+
+    // 5. Duplicate experience cue check across EXPERIENCE.md files
+    const seenCues = new Map<string, string>();
+    for (const file of files) {
+      if (!file.path.endsWith("EXPERIENCE.md")) continue;
+      for (const line of file.content.split(/\r?\n/)) {
+        const cueMatch = line.match(/^\s*-\s*\*\*Cue\*\*:\s*(.+)$/i);
+        if (!cueMatch?.[1]) continue;
+        const normalizedCue = cueMatch[1].trim().toLowerCase().replace(/\s+/g, " ");
+        const priorPath = seenCues.get(normalizedCue);
+        if (priorPath) {
+          findings.push({
+            id: `gardener-dup-exp-${file.path}-${seenCues.size}`,
+            kind: "duplicate_experience",
+            severity: "advisory",
+            path: file.path,
+            detail: `Experience cue duplicates entry already recorded in ${priorPath}.`,
+            suggestedAction: "consolidate",
+          });
+        } else {
+          seenCues.set(normalizedCue, file.path);
+        }
+      }
+    }
+
+    // 6. Same-model Improver / Judge collusion check
+    const improverSlot = this.appConfig.slots.improver;
+    const judgeSlot = this.appConfig.slots.judge;
+    const sameModelCollusion = Boolean(
+      improverSlot && judgeSlot && improverSlot.modelId === judgeSlot.modelId,
+    );
+    const modelDiversityOk = !sameModelCollusion;
+    if (sameModelCollusion && improverSlot) {
+      findings.push({
+        id: "gardener-same-model-collusion",
+        kind: "same_model_collusion",
+        severity: "warning",
+        path: "appConfig.slots",
+        detail: `Improver and Judge both bind "${improverSlot.modelId}", increasing self-preference bias.`,
+        suggestedAction: "diversify_models",
+      });
+    }
+
+    const penalty = findings.reduce(
+      (sum, f) => sum + (f.severity === "warning" ? 18 : 12),
+      0,
+    );
+    const healthScore = Math.max(0, Math.min(100, 100 - penalty));
+
+    const actionablePaths = findings
+      .filter((f) => f.kind !== "same_model_collusion")
+      .map((f) => f.path);
+    const suggestedPruningGoal =
+      actionablePaths.length > 0
+        ? `Audit and resolve harness hygiene findings (${actionablePaths.join(", ")}): wire untriggered skills into systemprompt.md or prune redundant assets while passing 6/6 regressions.`
+        : findings.length > 0
+          ? "Diversify Improver and Judge models or tighten always-on prompt footprint to eliminate bias and bloat."
+          : undefined;
+
+    return {
+      checkedAt: new Date().toISOString(),
+      commitSha: headSha,
+      healthScore,
+      alwaysOnBytes,
+      alwaysOnEstimatedTokens,
+      totalOrgans: files.length,
+      modelDiversityOk,
+      findings,
+      suggestedPruningGoal,
+    };
   }
 
   async reviseProposalWithComments(params: EvolutionReviseParams): Promise<EvolutionProposal> {

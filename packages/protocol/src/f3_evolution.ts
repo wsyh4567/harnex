@@ -100,6 +100,36 @@ export const HarnessCompatibilityReportSchema = z.object({
 });
 export type HarnessCompatibilityReport = z.infer<typeof HarnessCompatibilityReportSchema>;
 
+export const GardenerFindingSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum([
+    "prompt_bloat",
+    "untriggered_skill",
+    "orphan_script",
+    "duplicate_experience",
+    "empty_organ",
+    "same_model_collusion",
+  ]),
+  severity: z.enum(["advisory", "warning"]),
+  path: z.string().min(1),
+  detail: z.string().min(1),
+  suggestedAction: z.enum(["prune", "trigger", "consolidate", "diversify_models"]),
+});
+export type GardenerFinding = z.infer<typeof GardenerFindingSchema>;
+
+export const HarnessGardenerReportSchema = z.object({
+  checkedAt: z.string(),
+  commitSha: z.string(),
+  healthScore: z.number().int().min(0).max(100),
+  alwaysOnBytes: z.number().int().nonnegative(),
+  alwaysOnEstimatedTokens: z.number().int().nonnegative(),
+  totalOrgans: z.number().int().nonnegative(),
+  modelDiversityOk: z.boolean(),
+  findings: z.array(GardenerFindingSchema).default([]),
+  suggestedPruningGoal: z.string().optional(),
+});
+export type HarnessGardenerReport = z.infer<typeof HarnessGardenerReportSchema>;
+
 export const EvolutionProposalSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),

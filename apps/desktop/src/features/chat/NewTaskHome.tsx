@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { ArrowRight, GitBranch, Sparkles } from "lucide-react";
 import { localizeProposal } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
@@ -7,10 +6,16 @@ import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { TaskComposer } from "./TaskComposer.tsx";
 
 export function NewTaskHome() {
-  const { proposals, commits, systemHealth, selectProposal, setActivePage, setRightTab } =
-    useCommandDeckStore();
+  const {
+    proposals,
+    commits,
+    systemHealth,
+    selectProposal,
+    setActivePage,
+    setRightTab,
+    setComposerDraft,
+  } = useCommandDeckStore();
   const { locale, t } = useI18n();
-  const [draft, setDraft] = useState("");
 
   const activeSha = systemHealth?.activeCommitSha ?? commits[0]?.sha ?? "a7f3c91";
   const activeCommit = commits.find((c) => c.sha === activeSha) ?? commits[0];
@@ -65,7 +70,7 @@ export function NewTaskHome() {
             <button
               key={sc.label}
               type="button"
-              onClick={() => setDraft(sc.prompt)}
+              onClick={() => setComposerDraft("home", sc.prompt)}
               className="hx-pressable rounded-full border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 text-xs text-[var(--hx-text-2)] hover:border-[var(--hx-border-strong)] hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]"
             >
               {sc.label}
@@ -74,12 +79,7 @@ export function NewTaskHome() {
         </div>
 
         {/* Floating Task Composer */}
-        <TaskComposer
-          variant="home"
-          draftPrompt={draft}
-          onDraftChange={setDraft}
-          className="mt-5"
-        />
+        <TaskComposer variant="home" className="mt-5" />
 
         {/* Quiet RSI Highlight Strip (Real Winning Proposals) */}
         <div className="mt-7 w-full space-y-2">

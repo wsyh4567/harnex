@@ -33,6 +33,13 @@ interface TaskComposerProps {
   className?: string;
 }
 
+export function formatElapsedDuration(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins}:${String(secs).padStart(2, "0")}`;
+}
+
 export function TaskComposer({
   variant,
   draftPrompt,
@@ -51,6 +58,9 @@ export function TaskComposer({
     appConfig,
     selectedModelByThread,
     setThreadModelOverride,
+    composerDrafts,
+    setComposerDraft,
+    clearComposerDraft,
     sendPrompt,
     startNewTaskPrompt,
     pauseActiveRun,
@@ -64,11 +74,18 @@ export function TaskComposer({
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
 
-  const [internalPrompt, setInternalPrompt] = useState("");
-  const prompt = draftPrompt !== undefined ? draftPrompt : internalPrompt;
+  const activeThread =
+    variant === "thread" ? (threads.find((th) => th.id === activeThreadId) ?? null) : null;
+  const draftKey = variant === "home" ? "home" : (activeThread?.id ?? "home");
+
+  const prompt = draftPrompt !== undefined ? draftPrompt : (composerDrafts[draftKey] ?? "");
   const setPrompt = (val: string) => {
     if (onDraftChange) onDraftChange(val);
-    else setInternalPrompt(val);
+    else setComposerDraft(draftKey, val);
+  };
+  const clearDraft = () => {
+    if (onDraftChange) onDraftChange("");
+    else clearComposerDraft(draftKey);
   };
 
   const [homeMode, setHomeMode] = useState<ExecutionMode>("craft");
@@ -78,11 +95,22 @@ export function TaskComposer({
   const [menuDismissedAt, setMenuDismissedAt] = useState<number | null>(null);
   const [highlightIdx, setHighlightIdx] = useState(0);
   const [isComposing, setIsComposing] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const activeThread =
-    variant === "thread" ? (threads.find((th) => th.id === activeThreadId) ?? null) : null;
+  useEffect(() => {
+    if (activeThread?.status !== "running") {
+      setElapsedSeconds(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [activeThread?.id, activeThread?.status]);
   const currentMode: ExecutionMode = activeThread ? activeThread.mode : homeMode;
   const currentBinding: SlotBinding | undefined = activeThread
     ? (selectedModelByThread[activeThread.id] ?? appConfig?.slots.solver)
@@ -208,7 +236,7 @@ export function TaskComposer({
 
     if (trimmed.startsWith("/btw ") || trimmed === "/btw") {
       const q = trimmed.slice(4).trim();
-      setPrompt("");
+      clearDraft();
       setCursorPos(0);
       toggleSideChat(true);
       if (q) {
@@ -218,7 +246,7 @@ export function TaskComposer({
     }
 
     if (trimmed === "/evolve") {
-      setPrompt("");
+      clearDraft();
       setCursorPos(0);
       void triggerEvolution({ domain: activeThread?.domain ?? "general" });
       setActivePage("lab");
@@ -226,7 +254,7 @@ export function TaskComposer({
     }
 
     const text = trimmed;
-    setPrompt("");
+    clearDraft();
     setCursorPos(0);
     setMenuDismissedAt(null);
 
@@ -258,6 +286,12 @@ export function TaskComposer({
               <span className="flex items-center gap-2 text-xs text-cyan-700 dark:text-cyan-300">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 <span>{t("chat.runningInSandbox")}</span>
+                <span
+                  data-testid="running-elapsed-timer"
+                  className="hx-num font-mono text-[11px] rounded-md border border-cyan-500/25 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-700 dark:text-cyan-200"
+                >
+                  {t("chat.elapsed", { time: formatElapsedDuration(elapsedSeconds) })}
+                </span>
               </span>
               <div className="flex items-center gap-2">
                 <button

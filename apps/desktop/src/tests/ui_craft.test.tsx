@@ -238,4 +238,40 @@ describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n",
     expect(withError.errorCount).toBe(1);
     expect(withError.spans.some((s) => s.id === "msg-err:tool:tc-err" && s.isError)).toBe(true);
   });
+
+  it("persists per-thread composer drafts, clears on delete, and wires Gardener report + pruning handoff", async () => {
+    const store = useCommandDeckStore.getState();
+
+    // Persistent drafts across threads & home
+    store.setComposerDraft("home", "Draft on home");
+    store.setComposerDraft("thr-billing-csv", "Check GB18030 BOM");
+    expect(useCommandDeckStore.getState().composerDrafts["home"]).toBe("Draft on home");
+    expect(useCommandDeckStore.getState().composerDrafts["thr-billing-csv"]).toBe(
+      "Check GB18030 BOM",
+    );
+
+    store.clearComposerDraft("home");
+    expect(useCommandDeckStore.getState().composerDrafts["home"]).toBeUndefined();
+
+    // Deleting a thread cleans its draft cleanly
+    await useCommandDeckStore.getState().deleteThread("thr-billing-csv");
+    expect(useCommandDeckStore.getState().composerDrafts["thr-billing-csv"]).toBeUndefined();
+
+    // Gardener entropy report is loaded on initialize and detects untriggered mock skill honestly
+    const report = useCommandDeckStore.getState().gardenerReport;
+    expect(report).not.toBeNull();
+    expect(report!.healthScore).toBeGreaterThanOrEqual(0);
+    expect(report!.healthScore).toBeLessThanOrEqual(100);
+    expect(report!.alwaysOnEstimatedTokens).toBeGreaterThan(0);
+    expect(report!.modelDiversityOk).toBe(true);
+    expect(report!.findings.some((f) => f.kind === "untriggered_skill")).toBe(true);
+    expect(report!.suggestedPruningGoal).toBeTruthy();
+
+    // One-click Pruning Evolution handoff sets pendingLabGoal and navigates to Lab
+    useCommandDeckStore.getState().launchPruningEvolution(report!.suggestedPruningGoal!);
+    expect(useCommandDeckStore.getState().activePage).toBe("lab");
+    expect(useCommandDeckStore.getState().pendingLabGoal).toBe(report!.suggestedPruningGoal!);
+    useCommandDeckStore.getState().consumePendingLabGoal();
+    expect(useCommandDeckStore.getState().pendingLabGoal).toBeNull();
+  });
 });

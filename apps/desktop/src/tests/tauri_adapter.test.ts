@@ -567,4 +567,40 @@ describe("TauriIpcAdapter 1:1 Parity with tray.rs & Runtime Selection", () => {
       },
     ]);
   });
+
+  it("invokes evolution.gardener_report via sidecar_rpc and returns HarnessGardenerReport", async () => {
+    const adapter = new TauriIpcAdapter();
+    invokeResponseFactory = (cmd, args) => {
+      if (cmd === "sidecar_rpc" && args?.method === "evolution.gardener_report") {
+        return {
+          checkedAt: "2026-11-24T03:00:00Z",
+          commitSha: "a7f3c91",
+          healthScore: 88,
+          alwaysOnBytes: 512,
+          alwaysOnEstimatedTokens: 128,
+          totalOrgans: 10,
+          modelDiversityOk: true,
+          findings: [
+            {
+              id: "untriggered_skill:skills/csv_audit/SKILL.md",
+              kind: "untriggered_skill",
+              severity: "warning",
+              path: "skills/csv_audit/SKILL.md",
+              detail: "Skill has no trigger reference in always-on prompts.",
+              suggestedAction: "trigger",
+            },
+          ],
+          suggestedPruningGoal: "Wire trigger for skills/csv_audit/SKILL.md.",
+        };
+      }
+      return undefined;
+    };
+
+    const report = await adapter.getGardenerReport();
+    expect(report.healthScore).toBe(88);
+    expect(report.findings).toHaveLength(1);
+    expect(recordedInvokes).toEqual([
+      { cmd: "sidecar_rpc", args: { method: "evolution.gardener_report", params: {} } },
+    ]);
+  });
 });

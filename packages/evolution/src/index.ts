@@ -1,6 +1,7 @@
 export const EVOLUTION_PACKAGE = "@harnex/evolution";
 export * from "./harness2/tree.ts";
 export { CURRENT_HARNESS_SCHEMA_VERSION, inspectHarnessCompatibility, type CompatibilityOptions } from "./harness2/compatibility.ts";
+export { inspectHarnessHygiene, type GardenerOptions } from "./harness2/gardener.ts";
 export * from "./harness2/prompts.ts";
 export * from "./harness2/context.ts";
 export * from "./harness2/ledger.ts";

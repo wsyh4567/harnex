@@ -17,6 +17,7 @@ import type {
   GlobalHookItem,
   GuardianDecision,
   HarnessCompatibilityReport,
+  HarnessGardenerReport,
   ImportPreview,
   ModelSlot,
   OnboardingReplayTrace,
@@ -166,6 +167,7 @@ export interface CommandDeckState {
   messagesByThread: Record<string, ChatMessage[]>;
   streamingByThread: Record<string, StreamingBuffer>;
   sideChatByThread: Record<string, SideChatTurn[]>;
+  composerDrafts: Record<string, string>;
 
   // F2: Security & Trust
   pendingApprovals: ApprovalRequest[];
@@ -201,6 +203,9 @@ export interface CommandDeckState {
   compatibilityReport: HarnessCompatibilityReport | null;
   isMigrating: boolean;
   dismissedMigrationAlert: boolean;
+  gardenerReport: HarnessGardenerReport | null;
+  gardenerLoading: boolean;
+  pendingLabGoal: string | null;
 
   // Actions
   initialize: (client?: HarnexIpcClient) => Promise<void>;
@@ -242,6 +247,8 @@ export interface CommandDeckState {
   createThread: (title?: string, mode?: ExecutionMode) => Promise<Thread>;
   setThreadMode: (threadId: string, mode: ExecutionMode) => void;
   setThreadModelOverride: (threadId: string, binding: SlotBinding | undefined) => void;
+  setComposerDraft: (scopeKey: string, text: string) => void;
+  clearComposerDraft: (scopeKey: string) => void;
   sendPrompt: (prompt: string) => Promise<void>;
   pauseActiveRun: () => Promise<void>;
   steerActiveRun: (instruction: string, triggerEvolution?: boolean) => Promise<void>;
@@ -311,6 +318,9 @@ export interface CommandDeckState {
   checkHarnessCompatibility: () => Promise<HarnessCompatibilityReport | null>;
   startHarnessMigration: () => Promise<EvolutionProposal | null>;
   dismissMigrationAlert: () => void;
+  refreshGardenerReport: () => Promise<HarnessGardenerReport | null>;
+  launchPruningEvolution: (goal: string) => void;
+  consumePendingLabGoal: () => void;
 
   // Internal event handler
   handleIpcEvent: (event: HarnexIpcEvent) => void;
@@ -331,6 +341,37 @@ function upsertToolCall(toolCalls: ToolCallRecord[], incoming: ToolCallRecord): 
   return exists
     ? toolCalls.map((tc) => (tc.id === incoming.id ? { ...tc, ...incoming } : tc))
     : [...toolCalls, incoming];
+}
+
+export const COMPOSER_DRAFTS_KEY = "harnex:composer-drafts:v1";
+const MAX_COMPOSER_DRAFTS = 20;
+
+function normalizeComposerDrafts(raw: Record<string, string>): Record<string, string> {
+  const entries = Object.entries(raw).filter(
+    ([key, val]) => key.trim().length > 0 && typeof val === "string" && val.trim().length > 0,
+  );
+  return Object.fromEntries(entries.slice(-MAX_COMPOSER_DRAFTS));
+}
+
+export function loadComposerDrafts(): Record<string, string> {
+  try {
+    const raw = globalThis.localStorage?.getItem(COMPOSER_DRAFTS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return normalizeComposerDrafts(parsed as Record<string, string>);
+  } catch {
+    return {};
+  }
+}
+
+export function saveComposerDrafts(drafts: Record<string, string>): void {
+  try {
+    const normalized = normalizeComposerDrafts(drafts);
+    globalThis.localStorage?.setItem(COMPOSER_DRAFTS_KEY, JSON.stringify(normalized));
+  } catch {
+    // Ignore storage quota or SSR/test unavailability
+  }
 }
 
 function dedupeMessagesById(msgs: ChatMessage[]): ChatMessage[] {
@@ -382,6 +423,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   messagesByThread: {},
   streamingByThread: {},
   sideChatByThread: {},
+  composerDrafts: loadComposerDrafts(),
 
   pendingApprovals: [],
   execPolicyRules: [],
@@ -414,6 +456,9 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   compatibilityReport: null,
   isMigrating: false,
   dismissedMigrationAlert: false,
+  gardenerReport: null,
+  gardenerLoading: false,
+  pendingLabGoal: null,
 
   disposeSubscription: () => {
     initGeneration += 1;
@@ -512,11 +557,13 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       genomeFiles,
       providers,
       aggregatedCatalog,
+      composerDrafts: loadComposerDrafts(),
     });
 
-    // Quietly check for updates & harness compatibility on startup without blocking initial deck render
+    // Quietly check for updates, compatibility & gardener hygiene on startup without blocking initial deck render
     void get().checkForUpdates();
     void get().checkHarnessCompatibility();
+    void get().refreshGardenerReport();
   },
 
   pushToast: (toast) => {
@@ -686,6 +733,9 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       delete nextSideChat[threadId];
       const nextModels = { ...s.selectedModelByThread };
       delete nextModels[threadId];
+      const nextDrafts = { ...s.composerDrafts };
+      delete nextDrafts[threadId];
+      saveComposerDrafts(nextDrafts);
 
       const deletingActive = s.activeThreadId === threadId;
       const nextThread = deletingActive ? (remaining[0] ?? null) : null;
@@ -694,6 +744,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         messagesByThread: nextMessages,
         sideChatByThread: nextSideChat,
         selectedModelByThread: nextModels,
+        composerDrafts: nextDrafts,
         activeThreadId: deletingActive ? (nextThread?.id ?? null) : s.activeThreadId,
         activePage: deletingActive && !nextThread ? "home" : s.activePage,
       };
@@ -775,6 +826,33 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       if (binding) next[threadId] = binding;
       else delete next[threadId];
       return { selectedModelByThread: next };
+    });
+  },
+
+  setComposerDraft: (scopeKey, text) => {
+    const cleanKey = scopeKey.trim();
+    if (!cleanKey) return;
+    set((s) => {
+      const next = { ...s.composerDrafts };
+      delete next[cleanKey];
+      if (text.trim().length > 0) {
+        next[cleanKey] = text;
+      }
+      const normalized = normalizeComposerDrafts(next);
+      saveComposerDrafts(normalized);
+      return { composerDrafts: normalized };
+    });
+  },
+
+  clearComposerDraft: (scopeKey) => {
+    const cleanKey = scopeKey.trim();
+    if (!cleanKey) return;
+    set((s) => {
+      if (!(cleanKey in s.composerDrafts)) return s;
+      const next = { ...s.composerDrafts };
+      delete next[cleanKey];
+      saveComposerDrafts(next);
+      return { composerDrafts: next };
     });
   },
 
@@ -1150,6 +1228,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       genomeFiles,
       compatibilityReport: resolvedCompat,
     });
+    void get().refreshGardenerReport();
     get().pushToast({
       tone: "success",
       title: `Adopted ${res.proposal.title}`,
@@ -1179,6 +1258,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       get().ipc.readGenomeTree(commit.sha),
     ]);
     set({ commits, systemHealth, selectedCommitSha: commit.sha, genomeFiles });
+    void get().refreshGardenerReport();
     get().pushToast({
       tone: "warning",
       title: `Reverted Harness to ${commit.versionTag}`,
@@ -1515,6 +1595,26 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   },
 
   dismissMigrationAlert: () => set({ dismissedMigrationAlert: true }),
+
+  refreshGardenerReport: async () => {
+    set({ gardenerLoading: true });
+    try {
+      const gardenerReport = await get().ipc.getGardenerReport();
+      set({ gardenerReport, gardenerLoading: false });
+      return gardenerReport;
+    } catch {
+      set({ gardenerLoading: false });
+      return null;
+    }
+  },
+
+  launchPruningEvolution: (goal) => {
+    set({ pendingLabGoal: goal, activePage: "lab" });
+  },
+
+  consumePendingLabGoal: () => {
+    set({ pendingLabGoal: null });
+  },
 
   handleIpcEvent: (event) => {
     switch (event.type) {
