@@ -14,8 +14,60 @@ use tokio::{
 const FRAME_LIMIT: u64 = 8 * 1024 * 1024;
 const HEARTBEAT: &str = "system.heartbeat";
 const PROBE_INTERVAL: Duration = Duration::from_millis(250);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(1250);
 const RESTART_DELAY: Duration = Duration::from_millis(150);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+const SAFE_ENV_KEYS: &[&str] = &[
+    "HOME",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "HARNEX_SIDECAR_DB",
+    #[cfg(windows)]
+    "SystemRoot",
+    #[cfg(windows)]
+    "SystemDrive",
+    #[cfg(windows)]
+    "USERPROFILE",
+    #[cfg(windows)]
+    "HOMEDRIVE",
+    #[cfg(windows)]
+    "HOMEPATH",
+    #[cfg(windows)]
+    "APPDATA",
+    #[cfg(windows)]
+    "LOCALAPPDATA",
+    #[cfg(windows)]
+    "TEMP",
+    #[cfg(windows)]
+    "TMP",
+    #[cfg(windows)]
+    "ComSpec",
+];
+
+fn collect_safe_env<F>(lookup: F) -> Vec<(&'static str, OsString)>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    SAFE_ENV_KEYS
+        .iter()
+        .filter_map(|&key| {
+            let value = lookup(key)?;
+            (!value.is_empty()).then_some((key, value))
+        })
+        .collect()
+}
 
 type Reply = oneshot::Sender<Result<Value, JsonRpcError>>;
 type HandlerFuture = Pin<Box<dyn Future<Output = Result<Value, JsonRpcError>> + Send>>;
@@ -69,9 +121,18 @@ fn timeout_for_method(method: &str) -> Duration {
 
 impl Sidecar {
     pub fn start(executable: PathBuf, args: Vec<OsString>, handler: Option<RpcHandler>) -> Self {
+        Self::start_with_env(executable, args, Vec::new(), handler)
+    }
+
+    pub fn start_with_env(
+        executable: PathBuf,
+        args: Vec<OsString>,
+        extra_env: Vec<(OsString, OsString)>,
+        handler: Option<RpcHandler>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel(64);
         let (updates, health) = watch::channel(SidecarHealth::default());
-        tokio::spawn(supervise(executable, args, rx, updates, handler));
+        tokio::spawn(supervise(executable, args, extra_env, rx, updates, handler));
         Self { tx, health }
     }
 
@@ -120,6 +181,7 @@ impl Sidecar {
 async fn supervise(
     executable: PathBuf,
     args: Vec<OsString>,
+    extra_env: Vec<(OsString, OsString)>,
     mut calls: mpsc::Receiver<Call>,
     health: watch::Sender<SidecarHealth>,
     handler: Option<RpcHandler>,
@@ -136,10 +198,20 @@ async fn supervise(
             .stderr(Stdio::null())
             .kill_on_drop(true);
         #[cfg(windows)]
-        if let Ok(system) = crate::sandbox_os::windows::system_directory() {
-            if let Some(root) = system.parent() {
-                command.env("SystemRoot", root);
+        command.creation_flags(CREATE_NO_WINDOW);
+        for (key, value) in collect_safe_env(|key| std::env::var_os(key)) {
+            command.env(key, value);
+        }
+        #[cfg(windows)]
+        if std::env::var_os("SystemRoot").is_none() {
+            if let Ok(system) = crate::sandbox_os::windows::system_directory() {
+                if let Some(root) = system.parent() {
+                    command.env("SystemRoot", root);
+                }
             }
+        }
+        for (key, value) in &extra_env {
+            command.env(key, value);
         }
         if let Ok(mut child) = command.spawn() {
             let mut stdin = child.stdin.take().unwrap();
@@ -152,12 +224,14 @@ async fn supervise(
             let mut probe = time::interval(PROBE_INTERVAL);
             probe.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
             let mut last_pong = Instant::now();
+            let mut alive_once = false;
             loop {
                 tokio::select! {
                     _ = child.wait() => break,
                     _ = handlers.join_next(), if !handlers.is_empty() => {},
                     _ = probe.tick() => {
-                        if last_pong.elapsed() >= HEARTBEAT_TIMEOUT { break; }
+                        let deadline = if alive_once { HEARTBEAT_TIMEOUT } else { STARTUP_TIMEOUT };
+                        if last_pong.elapsed() >= deadline { break; }
                         let request = JsonRpcRequest { jsonrpc: "2.0".into(), id: JsonRpcId::Number(-1), method: HEARTBEAT.into(), params: None };
                         if write_frame(&mut stdin, &request).await.is_err() { break; }
                     }
@@ -203,12 +277,20 @@ async fn supervise(
                             let Some(id) = message.get("id").and_then(Value::as_i64) else { continue; };
                             if id == -1 && (message.get("result").is_some() || message.get("error").is_some()) {
                                 last_pong = Instant::now();
+                                alive_once = true;
                                 health.send_if_modified(|state| {
                                     let changed = !state.alive || state.restart_count != count;
                                     *state = SidecarHealth { alive: true, restart_count: count };
                                     changed
                                 });
                             } else if let Some(reply) = pending.remove(&id) {
+                                last_pong = Instant::now();
+                                alive_once = true;
+                                health.send_if_modified(|state| {
+                                    let changed = !state.alive || state.restart_count != count;
+                                    *state = SidecarHealth { alive: true, restart_count: count };
+                                    changed
+                                });
                                 let result = if let Some(value) = message.get("result") { Ok(value.clone()) }
                                     else { Err(message.get("error").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_else(unavailable)) };
                                 let _ = reply.send(result);
@@ -276,7 +358,7 @@ async fn write_frame(
     if line.len() as u64 > FRAME_LIMIT {
         return Err(io::Error::other("JSON-RPC frame exceeds limit"));
     }
-    time::timeout(Duration::from_millis(300), writer.write_all(&line))
+    time::timeout(WRITE_TIMEOUT, writer.write_all(&line))
         .await
         .map_err(io::Error::other)?
 }
@@ -284,6 +366,29 @@ async fn write_frame(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_timeout_gives_cold_sidecar_headroom() {
+        assert!(STARTUP_TIMEOUT >= Duration::from_secs(10));
+        assert!(STARTUP_TIMEOUT > HEARTBEAT_TIMEOUT);
+    }
+
+    #[test]
+    fn safe_env_allowlist_keeps_runtime_paths_and_drops_secrets() {
+        let env = collect_safe_env(|key| match key {
+            "HOME" => Some(OsString::from("/tmp/home")),
+            "HTTPS_PROXY" => Some(OsString::from("http://127.0.0.1:7890")),
+            "OPENAI_API_KEY" => Some(OsString::from("sk-secret")),
+            "ANTHROPIC_API_KEY" => Some(OsString::from("sk-ant-secret")),
+            _ => None,
+        });
+        assert!(env.iter().any(|(k, v)| *k == "HOME" && v == "/tmp/home"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| *k == "HTTPS_PROXY" && v == "http://127.0.0.1:7890"));
+        assert!(!env.iter().any(|(k, _)| *k == "OPENAI_API_KEY"));
+        assert!(!env.iter().any(|(k, _)| *k == "ANTHROPIC_API_KEY"));
+    }
 
     #[test]
     fn rpc_timeout_matches_the_method_tier() {

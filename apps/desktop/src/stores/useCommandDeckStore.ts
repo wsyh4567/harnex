@@ -524,8 +524,14 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     if (myGen !== initGeneration) return;
 
     const headSha = commits[0]?.sha ?? systemHealth.activeCommitSha;
-    const genomeFiles = headSha ? await ipc.readGenomeTree(headSha) : [];
+    const [genomeFiles, refreshedHealth] = await Promise.all([
+      headSha ? ipc.readGenomeTree(headSha) : Promise.resolve([]),
+      systemHealth.sidecarAlive
+        ? Promise.resolve(systemHealth)
+        : ipc.getSystemHealth().catch(() => systemHealth),
+    ]);
     if (myGen !== initGeneration) return;
+    const latestSystemHealth = refreshedHealth;
     const firstReadyProposal = proposals.find((p) => p.status === "ready") ?? proposals[0] ?? null;
 
     clearActiveSubscription();
@@ -536,7 +542,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     set({
       initialized: true,
       loading: false,
-      systemHealth,
+      systemHealth: latestSystemHealth,
       appConfig,
       budgetStatus,
       onboardingReplay,
@@ -559,6 +565,22 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       aggregatedCatalog,
       composerDrafts: loadComposerDrafts(),
     });
+
+    if (!latestSystemHealth.sidecarAlive) {
+      for (const delayMs of [1500, 4000]) {
+        setTimeout(() => {
+          if (myGen !== initGeneration || get().systemHealth?.sidecarAlive) return;
+          void ipc
+            .getSystemHealth()
+            .then((nextHealth) => {
+              if (myGen === initGeneration) {
+                set({ systemHealth: nextHealth });
+              }
+            })
+            .catch(() => {});
+        }, delayMs);
+      }
+    }
 
     // Quietly check for updates, compatibility & gardener hygiene on startup without blocking initial deck render
     void get().checkForUpdates();

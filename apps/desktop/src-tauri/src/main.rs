@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(not(debug_assertions), feature = "tauri-runtime"),
+    windows_subsystem = "windows"
+)]
+
 #[cfg(feature = "tauri-runtime")]
 fn main() {
     harnex_l0::tray::run();

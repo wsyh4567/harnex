@@ -14,6 +14,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    ffi::OsString,
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -743,8 +744,12 @@ pub fn run() {
             };
             let core = Arc::new(Executor::new(trust, budget, executable.clone(), approval));
             let handler = l0_handler(core.clone(), git.clone(), app.handle().clone());
+            let sidecar_env = vec![(
+                OsString::from("HARNEX_SIDECAR_DB"),
+                data.join("trace.sqlite").into_os_string(),
+            )];
             let sidecar = tauri::async_runtime::block_on(async {
-                Sidecar::start(executable, Vec::new(), Some(handler))
+                Sidecar::start_with_env(executable, Vec::new(), sidecar_env, Some(handler))
             });
             let updater = Arc::new(Updater::new(data.clone(), git.clone())?);
             app.manage(Desktop {
