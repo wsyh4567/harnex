@@ -61,6 +61,7 @@ fn timeout_for_method(method: &str) -> Duration {
         | "provider.fetch_models"
         | "provider.ping"
         | "provider.import_magpie"
+        | "evolution.architect_chat"
         | "budget.sync_pricing" => 90,
         _ => 30,
     })
@@ -295,6 +296,7 @@ mod tests {
             ("provider.fetch_models", 90),
             ("provider.ping", 90),
             ("provider.import_magpie", 90),
+            ("evolution.architect_chat", 90),
             ("budget.sync_pricing", 90),
             ("evolution.list_proposals", 30),
             (HEARTBEAT, 30),

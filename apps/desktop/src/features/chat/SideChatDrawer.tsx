@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Loader2, MessageSquareOff, Send, ShieldCheck, X } from "lucide-react";
+import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { localizeThreadTitle } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
 import { formatUsd } from "../../lib/utils.ts";
@@ -84,12 +85,15 @@ export function SideChatDrawer() {
                 {turn.question}
               </div>
               <div className="mr-4 rounded-xl border border-violet-500/25 bg-violet-50/70 px-3 py-2 text-[var(--hx-text)] dark:bg-violet-950/25">
-                <p className="leading-relaxed">
-                  {locale.startsWith("zh") && turn.answer.startsWith("[Isolated Side Chat")
-                    ? `【旁路隔离回答】关于「${turn.question}」：当前回答完全隔离于主任务轨迹与 Harness² 自进化语料之外，不会污染任何上下文。`
-                    : turn.answer}
-                </p>
-                <div className="mt-1 font-mono text-[10px] text-[var(--hx-text-3)]">
+                <MarkdownProse
+                  className="text-xs"
+                  content={
+                    locale.startsWith("zh") && turn.answer.startsWith("[Isolated Side Chat")
+                      ? `【旁路隔离回答】关于「${turn.question}」：当前回答完全隔离于主任务轨迹与 Harness² 自进化语料之外，不会污染任何上下文。`
+                      : turn.answer
+                  }
+                />
+                <div className="hx-num mt-1 font-mono text-[10px] text-[var(--hx-text-3)]">
                   {t("sidechat.isolated")} · {formatUsd(turn.costUsd)}
                 </div>
               </div>

@@ -5,6 +5,8 @@ import type {
   ApprovalResolveParams,
   BudgetStatus,
   ChatMessage,
+  EvolutionArchitectAskParams,
+  EvolutionArchitectAskResult,
   EvolutionEvent,
   EvolutionProposal,
   EvolutionProposalActionParams,
@@ -37,6 +39,8 @@ import type {
   SystemHealth,
   Thread,
   ThreadCreateParams,
+  ThreadDeleteParams,
+  ThreadRenameParams,
   TrustRecord,
   TrustStatus,
   UpdateEvent,
@@ -112,6 +116,8 @@ export interface HarnexIpcClient {
   listThreads(): Promise<Thread[]>;
   getThreadMessages(threadId: string): Promise<ChatMessage[]>;
   createThread(params: ThreadCreateParams): Promise<Thread>;
+  renameThread(params: ThreadRenameParams): Promise<Thread>;
+  deleteThread(params: ThreadDeleteParams): Promise<void>;
   startRun(params: RunnerStartParams): Promise<{ runId: string }>;
   pauseRun(params: RunnerControlParams): Promise<void>;
   steerRun(params: RunnerSteerParams): Promise<void>;
@@ -137,6 +143,7 @@ export interface HarnexIpcClient {
   // F3: Evolution Triage, Theater & Inline Diff Revision
   listProposals(): Promise<EvolutionProposal[]>;
   getSilentArchiveCount(): Promise<number>;
+  askEvolutionArchitect(params: EvolutionArchitectAskParams): Promise<EvolutionArchitectAskResult>;
   triggerEvolution(params: EvolutionTriggerParams): Promise<EvolutionProposal>;
   reviseProposalWithComments(params: EvolutionReviseParams): Promise<EvolutionProposal>;
   adoptProposal(params: EvolutionProposalActionParams): Promise<{

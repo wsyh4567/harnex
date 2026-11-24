@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   EvolutionModeSchema,
   RunMetricsSchema,
+  TokenUsageSchema,
   UntrustedSourceTagSchema,
 } from "./common.ts";
 
@@ -141,8 +142,32 @@ export const EvolutionTriggerParamsSchema = z.object({
   triggerSource: z
     .enum(["steer", "failure", "manual", "onboarding", "upgrade_migration"])
     .default("manual"),
+  goal: z.string().trim().max(4000).optional(),
+  improverModelOverride: z.string().min(1).optional(),
+  improverProviderIdOverride: z.string().min(1).optional(),
 });
 export type EvolutionTriggerParams = z.infer<typeof EvolutionTriggerParamsSchema>;
+
+export const EvolutionArchitectAskParamsSchema = z.object({
+  pillarId: z.string().min(1),
+  pillarTitle: z.string().min(1),
+  domain: z.string().min(1),
+  message: z.string().trim().min(1).max(4000),
+  goalDraft: z.string().max(4000).optional(),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+  modelOverride: z.string().min(1).optional(),
+  providerIdOverride: z.string().min(1).optional(),
+  locale: z.string().optional(),
+});
+export type EvolutionArchitectAskParams = z.infer<typeof EvolutionArchitectAskParamsSchema>;
+
+export const EvolutionArchitectAskResultSchema = z.object({
+  reply: z.string(),
+  suggestedGoal: z.string().optional(),
+  modelId: z.string(),
+  usage: TokenUsageSchema,
+});
+export type EvolutionArchitectAskResult = z.infer<typeof EvolutionArchitectAskResultSchema>;
 
 export const EvolutionReviseParamsSchema = z.object({
   proposalId: z.string().min(1),

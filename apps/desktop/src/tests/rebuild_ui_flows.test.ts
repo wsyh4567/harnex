@@ -171,10 +171,11 @@ describe("Harnex Rebuilt UI: Prompt Completions, Pure i18n Separation & Guided N
     expect(useCommandDeckStore.getState().activePage).toBe("lab");
 
     store.setGuidedBlueprint("hooks");
-    store.sendGuidedMessage("hooks", "优先增加 PII 脱敏防护", "遮蔽所有 sk- 密钥");
+    await store.sendGuidedMessage("hooks", "优先增加 PII 脱敏防护", "遮蔽所有 sk- 密钥");
     const turns = useCommandDeckStore.getState().guidedMessagesByBlueprint["hooks"] ?? [];
     expect(turns.length).toBe(2);
     expect(turns[1]?.content).toContain("4. 流程钩子 (Hooks)");
+    expect(useCommandDeckStore.getState().guidedSuggestedGoalByBlueprint["hooks"]).toBeTruthy();
 
     // Re-initialize preserves persisted locale in localStorage
     store.setLocale("en-US");
@@ -403,20 +404,21 @@ describe("Harnex Rebuilt UI: Prompt Completions, Pure i18n Separation & Guided N
     expect(streamingCalls[0]?.status).toBe("completed");
   });
 
-  it("tracks guided Evolution Architect model override and records active modelId on assistant turns", () => {
+  it("tracks guided Evolution Architect model override and records active modelId on assistant turns", async () => {
     const store = useCommandDeckStore.getState();
     store.setLocale("zh-CN");
     expect(store.guidedModelOverride).toBeUndefined();
 
     const defaultImprover = store.appConfig?.slots.improver ?? store.appConfig?.slots.solver;
-    store.sendGuidedMessage("memory", "使用 /skill csv-audit 梳理记忆格式", "降低人工反复提示");
+    await store.sendGuidedMessage("memory", "使用 /skill csv-audit 梳理记忆格式", "降低人工反复提示");
     let turns = useCommandDeckStore.getState().guidedMessagesByBlueprint["memory"] ?? [];
     expect(turns[1]?.modelId).toBe(defaultImprover?.modelId);
+    expect(useCommandDeckStore.getState().guidedLoading).toBe(false);
 
     store.setGuidedModelOverride({ providerId: "prov-anthropic", modelId: "claude-sonnet-4-5" });
     expect(useCommandDeckStore.getState().guidedModelOverride?.modelId).toBe("claude-sonnet-4-5");
 
-    useCommandDeckStore
+    await useCommandDeckStore
       .getState()
       .sendGuidedMessage("memory", "结合 @memory/LongTermMEMORY.md 精简上下文", "");
     turns = useCommandDeckStore.getState().guidedMessagesByBlueprint["memory"] ?? [];
@@ -427,6 +429,41 @@ describe("Harnex Rebuilt UI: Prompt Completions, Pure i18n Separation & Guided N
     expect(useCommandDeckStore.getState().guidedModelOverride).toBeUndefined();
     expect(translate("zh-CN", "lab.resetImprover")).toBe("恢复默认进化模型");
     expect(translate("en-US", "lab.resetImprover")).toBe("Improver Default");
+  });
+
+  it("supports thread rename/delete in store and forwards goal & improver overrides to triggerEvolution", async () => {
+    const adapter = new MockIpcAdapter({ simulationDelayMs: 0 });
+    const store = useCommandDeckStore.getState();
+    await store.initialize(adapter);
+
+    const created = await store.createThread("Initial Task Name", "craft");
+    await store.renameThread(created.id, "Polished Task Name");
+    expect(
+      useCommandDeckStore.getState().threads.find((th) => th.id === created.id)?.title,
+    ).toBe("Polished Task Name");
+
+    await store.deleteThread(created.id);
+    const afterDelete = useCommandDeckStore.getState();
+    expect(afterDelete.threads.some((th) => th.id === created.id)).toBe(false);
+    expect(afterDelete.activeThreadId).toBe(afterDelete.threads[0]?.id ?? null);
+
+    await afterDelete.triggerEvolution({
+      domain: "memory",
+      mode: "sequential",
+      k: 2,
+      goal: "Deduplicate LongTermMEMORY entries cleanly",
+      improverModelOverride: "claude-sonnet-4-5",
+      improverProviderIdOverride: "prov-anthropic",
+    });
+
+    expect(adapter.recordedEvolutionTriggers.slice(-1)[0]).toMatchObject({
+      domain: "memory",
+      mode: "sequential",
+      k: 2,
+      goal: "Deduplicate LongTermMEMORY entries cleanly",
+      improverModelOverride: "claude-sonnet-4-5",
+      improverProviderIdOverride: "prov-anthropic",
+    });
   });
 
   it("refreshes budgetStatus & silentArchiveCount and pushes localized toasts on triggerEvolution, submitInlineRevision, and proposal_ready", async () => {

@@ -1,5 +1,6 @@
 import {
   ApprovalResolveParamsSchema,
+  EvolutionArchitectAskResultSchema,
   EvolutionEventSchema,
   EvolutionProposalSchema,
   GenomeFileSchema,
@@ -18,6 +19,8 @@ import {
   type ApprovalResolveParams,
   type BudgetStatus,
   type ChatMessage,
+  type EvolutionArchitectAskParams,
+  type EvolutionArchitectAskResult,
   type EvolutionProposal,
   type EvolutionProposalActionParams,
   type EvolutionReviseParams,
@@ -46,6 +49,8 @@ import {
   type SystemHealth,
   type Thread,
   type ThreadCreateParams,
+  type ThreadDeleteParams,
+  type ThreadRenameParams,
   type TrustRecord,
   type TrustStatus,
   type UpdateStatus,
@@ -151,6 +156,14 @@ export class TauriIpcAdapter implements HarnexIpcClient {
     return this.rpc<Thread>("thread.create", params);
   }
 
+  renameThread(params: ThreadRenameParams): Promise<Thread> {
+    return this.rpc<Thread>("thread.rename", params);
+  }
+
+  deleteThread(params: ThreadDeleteParams): Promise<void> {
+    return this.rpc<void>("thread.delete", params);
+  }
+
   startRun(params: RunnerStartParams): Promise<{ runId: string }> {
     return this.rpc<{ runId: string }>("runner.start", params);
   }
@@ -238,6 +251,13 @@ export class TauriIpcAdapter implements HarnexIpcClient {
 
   getSilentArchiveCount(): Promise<number> {
     return this.rpc<number>("evolution.silent_archive_count");
+  }
+
+  async askEvolutionArchitect(
+    params: EvolutionArchitectAskParams,
+  ): Promise<EvolutionArchitectAskResult> {
+    const raw = await this.rpc<unknown>("evolution.architect_chat", params);
+    return EvolutionArchitectAskResultSchema.parse(raw);
   }
 
   triggerEvolution(params: EvolutionTriggerParams): Promise<EvolutionProposal> {

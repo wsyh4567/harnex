@@ -31,7 +31,8 @@ export function distilExperience(domain: string, reply: string): ExperienceEntry
 export async function reflectAdoption(llm: LlmClient, domain: string, evidence: EvidenceBundle, control: ModelControl = {}, lowConfidence = false): Promise<ExperienceEntry | undefined> {
   const systemPrompt = experiencePrompt();
   const response = await completeModel(llm, {
-    slot: "improver", systemPrompt, messages: [{ role: "user", content: formatStageUserMessage(evidence, systemPrompt) }],
+    slot: "improver", modelId: control.modelId, providerIdOverride: control.providerIdOverride,
+    systemPrompt, messages: [{ role: "user", content: formatStageUserMessage(evidence, systemPrompt) }],
   }, control);
   if (response.finishReason !== "stop") return undefined;
   const entry = distilExperience(domain, response.content);

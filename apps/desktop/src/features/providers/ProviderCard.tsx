@@ -97,6 +97,22 @@ export function ProviderCard({
     if (err === "429 rate limit recovered") return "429 限流已自动恢复";
     return err;
   };
+
+  const resolvePingDiagnostic = (err: string) => {
+    if (/\b(401|403)\b|unauthorized|invalid.*key|auth/i.test(err)) {
+      return t("prov.diagAuth");
+    }
+    if (/\b404\b|not found/i.test(err)) {
+      return t("prov.diagNotFound");
+    }
+    if (/\b429\b|rate.?limit|quota/i.test(err)) {
+      return t("prov.diagRateLimit");
+    }
+    if (/\b(502|503|504)\b|bad gateway|unavailable/i.test(err)) {
+      return t("prov.diagGateway");
+    }
+    return t("prov.diagNetwork");
+  };
   const pinnedSet = new Set(provider.pinnedModels ?? []);
   const activeKeys = countActiveProviderKeys(provider);
   const keys = provider.keys ?? [];
@@ -274,9 +290,14 @@ export function ProviderCard({
         </div>
       </div>
 
-      {pingResult?.error && (
-        <div className="text-[11px] text-rose-700 dark:text-rose-300">
-          {t("prov.pingFailed", { error: pingResult.error })}
+      {pingResult && !pingResult.ok && pingResult.error && (
+        <div
+          data-testid={`provider-ping-error-${provider.id}`}
+          className="flex flex-wrap items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-50/85 px-2.5 py-1.5 text-[11px] text-rose-800 dark:bg-rose-950/35 dark:text-rose-200"
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-rose-600 dark:text-rose-400" />
+          <span className="font-semibold">{resolvePingDiagnostic(pingResult.error)}:</span>
+          <span className="break-all font-mono text-[10px] opacity-90">{pingResult.error}</span>
         </div>
       )}
       {fetchResult && (

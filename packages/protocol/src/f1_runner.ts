@@ -86,6 +86,15 @@ export const ThreadCreateParamsSchema = z.object({
 });
 export type ThreadCreateParams = z.infer<typeof ThreadCreateParamsSchema>;
 
+export const ThreadRenameParamsSchema = z.object({
+  threadId: z.string().min(1),
+  title: z.string().trim().min(1).max(120),
+});
+export type ThreadRenameParams = z.infer<typeof ThreadRenameParamsSchema>;
+
+export const ThreadDeleteParamsSchema = z.object({ threadId: z.string().min(1) });
+export type ThreadDeleteParams = z.infer<typeof ThreadDeleteParamsSchema>;
+
 export const RunnerStartParamsSchema = z.object({
   threadId: z.string().min(1),
   prompt: z.string().min(1),

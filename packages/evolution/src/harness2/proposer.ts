@@ -9,6 +9,8 @@ import { applyPatchOps, autotrigger, computeFileDiffs, fileLines, lineChanges, n
 const Operations = z.object({ operations: z.array(HarnessPatchOpSchema.strict()), notes: z.string().optional() }).strict();
 
 export interface ModelControl {
+  modelId?: string;
+  providerIdOverride?: string;
   signal?: AbortSignal;
   beforeCall?: () => Promise<void>;
   afterCall?: (response: LlmResponse) => Promise<void>;
@@ -106,11 +108,14 @@ export async function proposeHarness(llm: LlmClient, input: {
     const stageEvidence = error ? { ...evidence, files: { ...evidence.files, "previous_validation.txt": error } } : evidence;
     let response: LlmResponse;
     try {
-      const instructions = proposerStageInstructions(input.prompt, migration?.allowedPaths, comments, attempts === 2 ? error : undefined);
+      const stageInstructions = proposerStageInstructions(input.prompt, migration?.allowedPaths, comments, attempts === 2 ? error : undefined,
+        Object.hasOwn(evidence.files, "evolution_goal.md"));
       response = await completeModel(llm, {
         slot: "improver",
+        modelId: input.modelId,
+        providerIdOverride: input.providerIdOverride,
         systemPrompt: input.prompt,
-        messages: [{ role: "user", content: formatStageUserMessage(stageEvidence, instructions) }],
+        messages: [{ role: "user", content: formatStageUserMessage(stageEvidence, stageInstructions) }],
       }, input);
     } catch (cause) {
       input.signal?.throwIfAborted();

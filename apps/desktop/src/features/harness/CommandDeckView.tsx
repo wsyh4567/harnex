@@ -1,21 +1,22 @@
 import { useState } from "react";
 import {
   BarChart3,
+  Brain,
   ChevronDown,
   ChevronRight,
   Flame,
   GitBranch,
-  MessageSquarePlus,
-  ShieldCheck,
+  Plug,
   Sparkles,
-  Wallet,
+  Webhook,
+  Wrench,
 } from "lucide-react";
 import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
 import { localizeThreadStatus, localizeThreadTitle } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
-import { formatTokens, formatUsd, shortSha } from "../../lib/utils.ts";
-import { resolveCostSourceBadge } from "../providers/providerPresets.ts";
+import { shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore, type RightWorkbenchTab } from "../../stores/useCommandDeckStore.ts";
+import { extractMcpServersFromGenome } from "../chat/promptCompletions.ts";
 import { DiffReviewPanel } from "../evolution/DiffReviewPanel.tsx";
 import { EvolutionTheaterPanel } from "../evolution/EvolutionTheaterPanel.tsx";
 import { TriagePanel } from "../evolution/TriagePanel.tsx";
@@ -33,12 +34,7 @@ export function CommandDeckView() {
     commits,
     genomeFiles,
     trustRecords,
-    systemHealth,
-    appConfig,
-    setRsiMode,
-    budgetStatus,
     openOnboarding,
-    toggleSideChat,
     threads,
     activeThreadId,
     setActiveThread,
@@ -52,12 +48,18 @@ export function CommandDeckView() {
   ).length;
   const headCommit = commits[0];
   const passPct = headCommit?.passRate !== undefined ? Math.round(headCommit.passRate * 100) : 94;
-  const rsiMode = appConfig?.rsiMode ?? systemHealth?.rsiMode ?? "manual";
   const activeThread = threads.find((th) => th.id === activeThreadId) ?? threads[0] ?? null;
-  const costMeta = resolveCostSourceBadge(budgetStatus?.costSource, locale);
-  const tokensText = t("budget.tokensShort", {
-    count: formatTokens(budgetStatus?.tokensToday ?? 0, locale),
-  });
+
+  const skillCount = genomeFiles.filter(
+    (f) => f.component === "skills" || f.path.startsWith("skills/"),
+  ).length;
+  const hookCount = genomeFiles.filter(
+    (f) => f.component === "hooks" || f.path.startsWith("hooks/"),
+  ).length;
+  const memoryCount = genomeFiles.filter(
+    (f) => f.component === "memory" || f.path.startsWith("memory/"),
+  ).length;
+  const mcpCount = extractMcpServersFromGenome(genomeFiles).length;
 
   const tabs: Array<{ id: RightWorkbenchTab; label: string; badge?: number }> = [
     { id: "triage", label: t("tabs.triage"), badge: triageCount },
@@ -70,51 +72,52 @@ export function CommandDeckView() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-[var(--hx-canvas)]">
-      {/* Live Operations Strip */}
+      {/* Living Genome Pulse Strip */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--hx-border)] bg-[var(--hx-sidebar)]/50 px-5 py-3 text-xs">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5">
             <GitBranch className="h-3.5 w-3.5 text-[var(--hx-accent)]" />
-            <span className="font-mono font-semibold text-[var(--hx-text)]">
+            <span className="hx-num font-mono font-semibold text-[var(--hx-text)]">
               {headCommit?.versionTag ?? "v7"} · {shortSha(headCommit?.sha ?? "a7f3c91")}
             </span>
-            <span className="text-emerald-600 dark:text-emerald-400">
+            <span className="hx-num text-emerald-600 dark:text-emerald-400">
               · {t("genome.passRateBadge", { pct: passPct })}
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void setRsiMode(rsiMode === "manual" ? "auto" : "manual")}
-            className="hx-pressable inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 text-[var(--hx-text)] hover:border-[var(--hx-border-strong)]"
-          >
-            <Sparkles className="h-3.5 w-3.5 text-violet-500" />
-            <span>
-              {t("top.rsi")}: {rsiMode === "auto" ? t("top.rsiAuto") : t("top.rsiManual")}
+          {/* Active Organ Counts */}
+          <div className="hidden md:inline-flex items-center gap-2 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 text-[11px] text-[var(--hx-text-2)]">
+            <span className="hx-num inline-flex items-center gap-1">
+              <Wrench className="h-3 w-3 text-cyan-600 dark:text-cyan-400" />
+              {t("deck.organSkills", { count: skillCount })}
             </span>
-          </button>
-
-          <div className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 text-[var(--hx-text-2)]">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-            <span>
-              {systemHealth?.osSandboxLevel === "beta"
-                ? t("top.sandboxBeta")
-                : t("top.sandboxFull")}
+            <span className="opacity-30">·</span>
+            <span className="hx-num inline-flex items-center gap-1">
+              <Webhook className="h-3 w-3 text-violet-600 dark:text-violet-400" />
+              {t("deck.organHooks", { count: hookCount })}
+            </span>
+            <span className="opacity-30">·</span>
+            <span className="hx-num inline-flex items-center gap-1">
+              <Brain className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+              {t("deck.organMemory", { count: memoryCount })}
+            </span>
+            <span className="opacity-30">·</span>
+            <span className="hx-num inline-flex items-center gap-1">
+              <Plug className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+              {t("deck.organMcp", { count: mcpCount })}
             </span>
           </div>
 
-          <div
-            title={costMeta.tooltip}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 font-mono text-[var(--hx-text)]"
-          >
-            <Wallet className="h-3.5 w-3.5 text-emerald-500" />
-            <span>
-              {formatUsd(budgetStatus?.spentTodayUsd ?? 0)} /{" "}
-              {formatUsd(budgetStatus?.dailyLimitUsd ?? 5)}
-            </span>
-            <span className="text-[var(--hx-text-3)]">·</span>
-            <span className="font-sans text-[11px] text-[var(--hx-text-2)]">{tokensText}</span>
-          </div>
+          {triageCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setRightTab("triage")}
+              className="hx-pressable hx-num inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--hx-accent)] hover:opacity-90"
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{t("deck.readyProposalsBadge", { count: triageCount })}</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -139,15 +142,6 @@ export function CommandDeckView() {
           >
             <Flame className="h-3.5 w-3.5" />
             <span>{t("top.crucible")}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => toggleSideChat(true)}
-            className="hx-pressable inline-flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1.5 font-mono text-[var(--hx-text)] hover:border-[var(--hx-border-strong)]"
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5 text-violet-500" />
-            <span>/btw</span>
           </button>
         </div>
       </div>
@@ -195,7 +189,7 @@ export function CommandDeckView() {
               </button>
               <div className="flex items-center justify-between text-[11px] text-[var(--hx-text-2)]">
                 <span>{localizeThreadStatus(activeThread.status, locale)}</span>
-                <span className="font-mono">
+                <span className="hx-num font-mono">
                   {activeThread.pinnedVersionLabel ?? "v7"} ·{" "}
                   {shortSha(activeThread.pinnedCommitSha)}
                 </span>

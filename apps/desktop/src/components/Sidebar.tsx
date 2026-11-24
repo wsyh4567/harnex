@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Cpu,
   FlaskConical,
@@ -5,10 +6,13 @@ import {
   KeyRound,
   LayoutDashboard,
   PanelLeftClose,
+  Pencil,
   Plus,
+  Search,
   Settings,
   ShieldAlert,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { ChoiceMenu } from "./ui/ChoiceMenu.tsx";
 import { localizeThreadTitle } from "../i18n/demoContent.ts";
@@ -37,10 +41,15 @@ export function Sidebar() {
     activeWorkspace,
     setActiveWorkspace,
     setActiveThread,
+    renameThread,
+    deleteThread,
     proposals,
     pendingApprovals,
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
+  const [threadFilter, setThreadFilter] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
 
   if (sidebarCollapsed) return null;
 
@@ -53,7 +62,13 @@ export function Sidebar() {
     new Set(["~/Work", "~/Projects/acme-data", ...threads.map((th) => th.workspacePath)]),
   );
 
-  const visibleThreads = threads.filter((th) => th.workspacePath === activeWorkspace);
+  const workspaceThreads = threads.filter((th) => th.workspacePath === activeWorkspace);
+  const normalizedFilter = threadFilter.trim().toLowerCase();
+  const visibleThreads = normalizedFilter
+    ? workspaceThreads.filter((th) =>
+        localizeThreadTitle(th, locale).toLowerCase().includes(normalizedFilter),
+      )
+    : workspaceThreads;
 
   const evolutionNav: Array<{
     id: ActivePage;
@@ -191,6 +206,20 @@ export function Sidebar() {
             menuClassName="w-56"
           />
 
+          {workspaceThreads.length > 4 && (
+            <div className="flex items-center gap-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)]/75 px-2.5 py-1 text-[11px] focus-within:border-[var(--hx-accent-border)]">
+              <Search className="h-3 w-3 shrink-0 text-[var(--hx-text-3)]" />
+              <input
+                type="text"
+                data-testid="sidebar-thread-filter"
+                value={threadFilter}
+                onChange={(e) => setThreadFilter(e.target.value)}
+                placeholder={t("nav.filterThreads")}
+                className="w-full bg-transparent text-[11px] text-[var(--hx-text)] placeholder:text-[var(--hx-text-3)]"
+              />
+            </div>
+          )}
+
           <div className="space-y-0.5">
             {visibleThreads.length === 0 ? (
               <div className="px-2.5 py-2 text-[11px] text-[var(--hx-text-3)]">
@@ -199,45 +228,107 @@ export function Sidebar() {
             ) : (
               visibleThreads.map((th) => {
                 const active = activePage === "thread" && th.id === activeThreadId;
+                const isRenaming = renamingId === th.id;
+                const displayTitle = localizeThreadTitle(th, locale);
+
+                if (isRenaming) {
+                  return (
+                    <div
+                      key={th.id}
+                      className="rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-surface)] px-2.5 py-2 shadow-xs"
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        data-testid={`thread-rename-input-${th.id}`}
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void renameThread(th.id, renameDraft);
+                            setRenamingId(null);
+                          } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            setRenamingId(null);
+                          }
+                        }}
+                        onBlur={() => setRenamingId(null)}
+                        className="w-full bg-transparent text-xs font-medium text-[var(--hx-text)]"
+                      />
+                    </div>
+                  );
+                }
+
                 return (
-                  <button
-                    key={th.id}
-                    type="button"
-                    data-testid={`thread-item-${th.id}`}
-                    onClick={() => void setActiveThread(th.id)}
-                    className={cn(
-                      "hx-pressable w-full rounded-xl px-2.5 py-2 text-left border",
-                      active
-                        ? "border-[var(--hx-border)] bg-[var(--hx-surface)] text-[var(--hx-text)] shadow-xs"
-                        : "border-transparent text-[var(--hx-text-2)] hover:bg-[var(--hx-surface)]/70 hover:text-[var(--hx-text)]",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span
-                          className={cn(
-                            "h-1.5 w-1.5 shrink-0 rounded-full",
-                            STATUS_DOT[th.status] ?? "bg-slate-400",
-                          )}
-                        />
-                        <span className="truncate text-xs font-medium">
-                          {localizeThreadTitle(th, locale)}
-                        </span>
-                      </span>
-                      {th.hadHumanSteer && (
-                        <span className="shrink-0 rounded bg-violet-500/12 px-1.5 py-0.5 text-[9px] font-medium text-violet-700 dark:text-violet-300">
-                          {t("rail.steerBadge")}
-                        </span>
+                  <div key={th.id} className="group relative">
+                    <button
+                      type="button"
+                      data-testid={`thread-item-${th.id}`}
+                      onClick={() => void setActiveThread(th.id)}
+                      className={cn(
+                        "hx-pressable w-full rounded-xl px-2.5 py-2 text-left border",
+                        active
+                          ? "border-[var(--hx-border)] bg-[var(--hx-surface)] text-[var(--hx-text)] shadow-xs"
+                          : "border-transparent text-[var(--hx-text-2)] hover:bg-[var(--hx-surface)]/70 hover:text-[var(--hx-text)]",
                       )}
+                    >
+                      <div className="flex items-center justify-between gap-1.5 pr-10 group-hover:pr-12">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 shrink-0 rounded-full",
+                              STATUS_DOT[th.status] ?? "bg-slate-400",
+                            )}
+                          />
+                          <span className="truncate text-xs font-medium">{displayTitle}</span>
+                        </span>
+                        {th.hadHumanSteer && (
+                          <span className="shrink-0 rounded bg-violet-500/12 px-1.5 py-0.5 text-[9px] font-medium text-violet-700 dark:text-violet-300">
+                            {t("rail.steerBadge")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--hx-text-3)]">
+                        <span>{formatRelativeTime(th.updatedAt, locale)}</span>
+                        <span className="inline-flex items-center gap-1 font-mono">
+                          <Cpu className="h-2.5 w-2.5" />
+                          {th.pinnedVersionLabel ?? "v7"}
+                        </span>
+                      </div>
+                    </button>
+
+                    <div className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)]/95 p-0.5 opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+                      <button
+                        type="button"
+                        aria-label={t("nav.renameThread")}
+                        title={t("nav.renameThread")}
+                        data-testid={`thread-rename-${th.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingId(th.id);
+                          setRenameDraft(displayTitle);
+                        }}
+                        className="rounded-md p-1 text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]"
+                      >
+                        <Pencil className="h-2.5 w-2.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={th.status === "running"}
+                        aria-label={t("nav.deleteThread")}
+                        title={t("nav.deleteThread")}
+                        data-testid={`thread-delete-${th.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteThread(th.id);
+                        }}
+                        className="rounded-md p-1 text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-rose-500 disabled:opacity-35"
+                      >
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </button>
                     </div>
-                    <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--hx-text-3)]">
-                      <span>{formatRelativeTime(th.updatedAt, locale)}</span>
-                      <span className="inline-flex items-center gap-1 font-mono">
-                        <Cpu className="h-2.5 w-2.5" />
-                        {th.pinnedVersionLabel ?? "v7"}
-                      </span>
-                    </div>
-                  </button>
+                  </div>
                 );
               })
             )}

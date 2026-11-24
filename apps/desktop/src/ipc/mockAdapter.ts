@@ -5,6 +5,8 @@ import type {
   ApprovalResolveParams,
   BudgetStatus,
   ChatMessage,
+  EvolutionArchitectAskParams,
+  EvolutionArchitectAskResult,
   EvolutionProposal,
   EvolutionProposalActionParams,
   EvolutionReviseParams,
@@ -34,6 +36,8 @@ import type {
   SystemHealth,
   Thread,
   ThreadCreateParams,
+  ThreadDeleteParams,
+  ThreadRenameParams,
   TrustRecord,
   TrustStatus,
   UpdateStatus,
@@ -118,6 +122,7 @@ export class MockIpcAdapter implements HarnexIpcClient {
   };
 
   public readonly recordedRunStarts: RunnerStartParams[] = [];
+  public readonly recordedEvolutionTriggers: EvolutionTriggerParams[] = [];
   private readonly pausedThreads = new Set<string>();
   private readonly abortedThreads = new Set<string>();
   private readonly steeredInstructions = new Map<string, string[]>();
@@ -226,6 +231,39 @@ export class MockIpcAdapter implements HarnexIpcClient {
     this.threads = [thread, ...this.threads];
     this.messagesByThread[id] = [];
     return { ...thread };
+  }
+
+  async renameThread(params: ThreadRenameParams): Promise<Thread> {
+    const title = params.title.trim();
+    if (!title) {
+      throw new Error("Thread title cannot be empty");
+    }
+    const existing = this.threads.find((t) => t.id === params.threadId);
+    if (!existing) {
+      throw new Error(`Thread not found: ${params.threadId}`);
+    }
+    const updated: Thread = {
+      ...existing,
+      title,
+      updatedAt: new Date().toISOString(),
+    };
+    this.threads = this.threads.map((t) => (t.id === params.threadId ? updated : t));
+    return { ...updated, goals: updated.goals.map((g) => ({ ...g })) };
+  }
+
+  async deleteThread(params: ThreadDeleteParams): Promise<void> {
+    const existing = this.threads.find((t) => t.id === params.threadId);
+    if (!existing) {
+      throw new Error(`Thread not found: ${params.threadId}`);
+    }
+    if (existing.status === "running") {
+      throw new Error(`A run is active for thread: ${params.threadId}`);
+    }
+    this.threads = this.threads.filter((t) => t.id !== params.threadId);
+    delete this.messagesByThread[params.threadId];
+    this.pausedThreads.delete(params.threadId);
+    this.abortedThreads.delete(params.threadId);
+    this.steeredInstructions.delete(params.threadId);
   }
 
   async startRun(params: RunnerStartParams): Promise<{ runId: string }> {
@@ -761,6 +799,51 @@ export class MockIpcAdapter implements HarnexIpcClient {
     return this.silentArchiveCount;
   }
 
+  async askEvolutionArchitect(
+    params: EvolutionArchitectAskParams,
+  ): Promise<EvolutionArchitectAskResult> {
+    await this.sleep();
+    const headSha = this.commits[0]?.sha ?? this.systemHealth.activeCommitSha;
+    const files = this.genomeTrees[headSha] ?? [];
+    const relevant = files
+      .filter((f) => f.path.includes(params.domain) || f.component === params.domain)
+      .concat(files.slice(0, 3))
+      .slice(0, 3)
+      .map((f) => `\`${f.path}\``);
+    const fileList = relevant.length > 0 ? relevant.join(", ") : "`systemprompt.md`";
+    const isZh = (params.locale ?? "").startsWith("zh");
+    const modelId =
+      params.modelOverride ?? this.appConfig.slots.improver?.modelId ?? "claude-sonnet-4-5";
+
+    const usage = {
+      inputTokens: 320,
+      outputTokens: 118,
+      cachedInputTokens: 120,
+      reasoningTokens: 0,
+      costUsd: 0.0021,
+    };
+    this.budgetStatus.spentTodayUsd = Number(
+      (this.budgetStatus.spentTodayUsd + usage.costUsd).toFixed(4),
+    );
+    this.budgetStatus.tokensToday += usage.inputTokens + usage.outputTokens;
+
+    const cleanMsg = params.message.trim();
+    const suggestedGoal = isZh
+      ? `围绕「${params.pillarTitle}」优化 ${fileList.replace(/`/g, "")}，针对「${cleanMsg.slice(0, 80)}」在影子沙盒中将回归错误清零并验证双盲胜出。`
+      : `Refine ${fileList.replace(/`/g, "")} for ${params.pillarTitle}: address "${cleanMsg.slice(0, 80)}" with zero regression errors in CoW shadow sandbox and Blind Judge win.`;
+
+    const reply = isZh
+      ? `基于当前基因库资产（${fileList}），针对「${params.pillarTitle}」方向的建议：\n\n1. **聚焦改动范围**：优先在现有器官文件上做最小可逆增量，避免破坏已有回归基线。\n2. **可验证验收标准**：${params.goalDraft?.trim() ? `结合你当前草稿「${params.goalDraft.trim()}」，` : ""}建议将成功条件量化为「影子沙盒 0 报错、步骤数下降且 6/6 回归通过」。`
+      : `Grounded in current Genome assets (${fileList}) for **${params.pillarTitle}**:\n\n1. **Focused Delta**: Keep changes minimal and reversible within the relevant organ files.\n2. **Verifiable Criterion**: ${params.goalDraft?.trim() ? `Building on your draft ("${params.goalDraft.trim()}"), ` : ""}gate success on zero shadow-probe errors, fewer steps, and 6/6 regression passes.`;
+
+    return {
+      reply,
+      suggestedGoal,
+      modelId,
+      usage,
+    };
+  }
+
   private async emitTheaterSequence(proposalId: string, labelPrefix: string): Promise<void> {
     const stages: Array<{ stage: EvolutionStage; label: string; summary: string }> = [
       { stage: "queued", label: `${labelPrefix}: Queued in Harness² Scheduler`, summary: "Snapshot pinned" },
@@ -804,15 +887,17 @@ export class MockIpcAdapter implements HarnexIpcClient {
   }
 
   async triggerEvolution(params: EvolutionTriggerParams): Promise<EvolutionProposal> {
+    this.recordedEvolutionTriggers.push(params);
     const id = `prop-${Date.now()}`;
     await this.emitTheaterSequence(id, `Evolution (${params.domain})`);
     const head = this.commits[0];
     const now = new Date().toISOString();
+    const goalSnippet = params.goal?.trim() ? ` — ${params.goal.trim().slice(0, 64)}` : "";
     const proposal: EvolutionProposal = {
       id,
       threadId: params.threadId,
       domain: params.domain,
-      title: `Proposal #${this.proposals.length + 8}: Evolved ${params.domain} guardrail & helper`,
+      title: `Proposal #${this.proposals.length + 8}: Evolved ${params.domain} guardrail & helper${goalSnippet}`,
       mode: params.mode,
       k: params.k,
       triggerSource: params.triggerSource,
@@ -833,7 +918,9 @@ export class MockIpcAdapter implements HarnexIpcClient {
         reverseWinnerAnonId: "anon-B",
         orderConsistent: true,
         confidence: "high",
-        reasoning: "Candidate resolves errors deterministically inside CoW shadow sandbox with 67% fewer steps.",
+        reasoning: params.goal?.trim()
+          ? `Candidate satisfies goal ("${params.goal.trim()}") deterministically inside CoW shadow sandbox with 67% fewer steps.`
+          : "Candidate resolves errors deterministically inside CoW shadow sandbox with 67% fewer steps.",
         judgeModelId: this.appConfig.slots.judge?.modelId ?? "gpt-4.1",
       },
       diffs: [
@@ -848,7 +935,9 @@ export class MockIpcAdapter implements HarnexIpcClient {
       ],
       experienceEntry: {
         domain: params.domain,
-        cue: `Recurring ${params.domain} ambiguity during ${params.triggerSource} run`,
+        cue: params.goal?.trim()
+          ? params.goal.trim()
+          : `Recurring ${params.domain} ambiguity during ${params.triggerSource} run`,
         lesson: `Validate inputs deterministically via scripts/evolved_${params.domain}_helper.ts before side effects.`,
         evidence: "CoW shadow probe passed 0 errors across test fixtures.",
         confidence: "high (0.91)",

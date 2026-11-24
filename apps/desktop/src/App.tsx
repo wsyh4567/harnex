@@ -1,31 +1,77 @@
-import { useEffect } from "react";
+import { Suspense, lazy, useEffect } from "react";
 import { Loader2, X } from "lucide-react";
+import { CommandPaletteModal } from "./components/CommandPaletteModal.tsx";
 import { MigrationAlertBanner } from "./components/MigrationAlertBanner.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { NewTaskHome } from "./features/chat/NewTaskHome.tsx";
 import { SideChatDrawer } from "./features/chat/SideChatDrawer.tsx";
 import { ThreadWorkspace } from "./features/chat/ThreadWorkspace.tsx";
-import { EvolutionLabView } from "./features/evolution/EvolutionLabView.tsx";
-import { ProposalsView } from "./features/evolution/ProposalsView.tsx";
-import { CommandDeckView } from "./features/harness/CommandDeckView.tsx";
-import { GenomeDeckPanel } from "./features/harness/GenomeDeckPanel.tsx";
-import { OnboardingCrucibleModal } from "./features/onboarding/OnboardingCrucibleModal.tsx";
-import { ProvidersPanel } from "./features/providers/ProvidersPanel.tsx";
-import { SecurityCenterPanel } from "./features/security/SecurityCenterPanel.tsx";
-import { SettingsView } from "./features/settings/SettingsView.tsx";
 import { useI18n } from "./i18n/index.ts";
 import { cn } from "./lib/utils.ts";
 import { useCommandDeckStore } from "./stores/useCommandDeckStore.ts";
+
+const CommandDeckView = lazy(() =>
+  import("./features/harness/CommandDeckView.tsx").then((m) => ({ default: m.CommandDeckView })),
+);
+const EvolutionLabView = lazy(() =>
+  import("./features/evolution/EvolutionLabView.tsx").then((m) => ({
+    default: m.EvolutionLabView,
+  })),
+);
+const ProposalsView = lazy(() =>
+  import("./features/evolution/ProposalsView.tsx").then((m) => ({ default: m.ProposalsView })),
+);
+const GenomeDeckPanel = lazy(() =>
+  import("./features/harness/GenomeDeckPanel.tsx").then((m) => ({ default: m.GenomeDeckPanel })),
+);
+const SecurityCenterPanel = lazy(() =>
+  import("./features/security/SecurityCenterPanel.tsx").then((m) => ({
+    default: m.SecurityCenterPanel,
+  })),
+);
+const ProvidersPanel = lazy(() =>
+  import("./features/providers/ProvidersPanel.tsx").then((m) => ({ default: m.ProvidersPanel })),
+);
+const SettingsView = lazy(() =>
+  import("./features/settings/SettingsView.tsx").then((m) => ({ default: m.SettingsView })),
+);
+const OnboardingCrucibleModal = lazy(() =>
+  import("./features/onboarding/OnboardingCrucibleModal.tsx").then((m) => ({
+    default: m.OnboardingCrucibleModal,
+  })),
+);
+
+function ViewSuspenseFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center bg-[var(--hx-canvas)]">
+      <Loader2 className="h-4 w-4 animate-spin text-[var(--hx-accent)]" />
+    </div>
+  );
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target.isContentEditable
+  );
+}
 
 export function App() {
   const {
     initialized,
     loading,
     activePage,
+    setActivePage,
     initialize,
     disposeSubscription,
     toggleSideChat,
+    toggleSidebar,
+    toggleCommandPalette,
     toasts,
     dismissToast,
   } = useCommandDeckStore();
@@ -38,14 +84,35 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === ";") {
+      if (e.isComposing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+
+      const lower = e.key.toLowerCase();
+      if (lower === "k") {
+        e.preventDefault();
+        toggleCommandPalette();
+        return;
+      }
+      if (e.key === ";") {
         e.preventDefault();
         toggleSideChat();
+        return;
+      }
+
+      if (isEditableEventTarget(e.target)) return;
+
+      if (lower === "n") {
+        e.preventDefault();
+        setActivePage("home");
+      } else if (lower === "b") {
+        e.preventDefault();
+        toggleSidebar();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [toggleSideChat]);
+  }, [toggleCommandPalette, toggleSideChat, setActivePage, toggleSidebar]);
 
   if (!initialized && loading) {
     return (
@@ -69,31 +136,36 @@ export function App() {
         <div className="flex flex-1 min-h-0 overflow-hidden">
           {activePage === "home" && <NewTaskHome />}
           {activePage === "thread" && <ThreadWorkspace />}
-          {activePage === "deck" && <CommandDeckView />}
-          {activePage === "lab" && <EvolutionLabView />}
-          {activePage === "proposals" && <ProposalsView />}
-          {activePage === "history" && (
-            <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
-              <GenomeDeckPanel />
-            </div>
-          )}
-          {activePage === "security" && (
-            <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
-              <SecurityCenterPanel />
-            </div>
-          )}
-          {activePage === "providers" && (
-            <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
-              <ProvidersPanel />
-            </div>
-          )}
-          {activePage === "settings" && <SettingsView />}
+          <Suspense fallback={<ViewSuspenseFallback />}>
+            {activePage === "deck" && <CommandDeckView />}
+            {activePage === "lab" && <EvolutionLabView />}
+            {activePage === "proposals" && <ProposalsView />}
+            {activePage === "history" && (
+              <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
+                <GenomeDeckPanel />
+              </div>
+            )}
+            {activePage === "security" && (
+              <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
+                <SecurityCenterPanel />
+              </div>
+            )}
+            {activePage === "providers" && (
+              <div className="flex-1 overflow-hidden bg-[var(--hx-canvas)]">
+                <ProvidersPanel />
+              </div>
+            )}
+            {activePage === "settings" && <SettingsView />}
+          </Suspense>
         </div>
       </div>
 
       {/* Overlays */}
       <SideChatDrawer />
-      <OnboardingCrucibleModal />
+      <CommandPaletteModal />
+      <Suspense fallback={null}>
+        <OnboardingCrucibleModal />
+      </Suspense>
 
       {/* Toast Stack */}
       {toasts.length > 0 && (

@@ -398,4 +398,21 @@ describe("Harness² offline parity", () => {
       expect(f.llm.calls.every(call => !JSON.stringify(call).includes("expectedSignal"))).toBe(true);
     });
   });
+
+  test("threads user evolution goal into evolution_goal.md and propagates improver model/provider overrides", () => temporaryHost(async host => {
+    const f = await fixture(host);
+    const goal = "Ensure CSV exports always verify UTF-8 BOM handling before finishing";
+    const { proposal } = await f.scheduler.run({
+      ...params,
+      k: 1,
+      goal,
+      improverModelOverride: "custom-improver-model",
+      improverProviderIdOverride: "prov-custom",
+    });
+    expect(proposal.status).toBe("ready");
+    const improverCalls = f.llm.calls.filter(call => call.slot === "improver");
+    expect(improverCalls.length).toBeGreaterThan(0);
+    expect(improverCalls.every(call => call.modelId === "custom-improver-model" && call.providerIdOverride === "prov-custom")).toBe(true);
+    expect(improverCalls.some(call => call.messages[0]?.content.includes("evolution_goal.md") && call.messages[0]?.content.includes(goal))).toBe(true);
+  }));
 });

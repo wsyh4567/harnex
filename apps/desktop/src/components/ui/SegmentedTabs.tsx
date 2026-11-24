@@ -36,10 +36,11 @@ export function SegmentedTabs<T extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(item.id)}
+            style={active ? { boxShadow: "var(--hx-seg-edge)" } : undefined}
             className={cn(
               "hx-pressable inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium",
               active
-                ? "bg-[var(--hx-surface)] text-[var(--hx-text)] shadow-xs border border-[var(--hx-border)]"
+                ? "bg-[var(--hx-surface)] text-[var(--hx-text)] border border-[var(--hx-border)]"
                 : "border border-transparent text-[var(--hx-text-2)] hover:text-[var(--hx-text)]",
             )}
           >
@@ -47,7 +48,7 @@ export function SegmentedTabs<T extends string>({
             {item.badge !== undefined && Number(item.badge) > 0 && (
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-0.2 font-mono text-[10px]",
+                  "hx-num rounded-full px-1.5 py-0.2 font-mono text-[10px]",
                   active
                     ? "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
                     : "bg-[var(--hx-muted)] text-[var(--hx-text-2)]",

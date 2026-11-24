@@ -179,12 +179,15 @@ export class EvolutionScheduler {
   async run(params: EvolutionTriggerParams, options: EvolutionOptions = {}): Promise<EvolutionRun> {
     const input = EvolutionTriggerParamsSchema.parse(params);
     if (input.triggerSource === "upgrade_migration") throw new Error("Upgrade migration requires a compatibility report");
+    if (input.goal !== undefined) assertNoGraderVerdicts({ "evolution_goal.md": input.goal });
     const id = randomUUID();
     const scope = new JobScope(this.deps.bridge, id);
+    const model = { ...scope.model, modelId: input.improverModelOverride, providerIdOverride: input.improverProviderIdOverride };
     let initial: EvolutionProposal | undefined;
     try {
       const job = await scope.stage("queued", "evolution", () => this.job(input.threadId, input.domain, { ...this.defaults, ...options }));
       const { original, tree, evidence } = job;
+      evidence.goal = input.goal;
       initial = { ...input, id, title: job.thread.title, status: "running", requiresHumanTrust: false,
         baseCommitSha: original.pinnedCommitSha, sourceTags: [...evidence.sourceTags ?? []], metricsBefore: original.metrics,
         metricsAfter: original.metrics, diffs: [], inlineComments: [], createdAt: now(), updatedAt: now() };
@@ -194,7 +197,7 @@ export class EvolutionScheduler {
       if (dryRun.degradedReason) {
         const view = buildReflectorEvidence({ ...evidence, harness: tree, baseHarness: tree,
           rollouts: [{ label: "original", run: traceAsRun(original) }], winner: "original", reason: dryRun.degradedReason });
-        const entry = await scope.stage("reflecting", "reflection-only", () => reflectAdoption(this.deps.llm, input.domain, view, scope.model, true));
+        const entry = await scope.stage("reflecting", "reflection-only", () => reflectAdoption(this.deps.llm, input.domain, view, model, true));
         await scope.stage("completed", "evolution", () => undefined);
         return { proposal: await this.finish({ ...initial, status: entry ? "ready" : "archived_no_entry",
           degradedReason: dryRun.degradedReason, experienceEntry: entry }) };
@@ -206,7 +209,7 @@ export class EvolutionScheduler {
       const recursion = await recurse({ taskId: original.runId, k: input.k, baseTree: tree, checkpoint: scope.checkpoint,
         rollout: (label, candidate) => this.probe(scope, job, label, candidate),
         propose: stage => scope.stage(stage.dim === "INV" ? "proposing_inv" : stage.dim === "DOM" ? "proposing_dom" : "composing", stage.label,
-          () => proposeHarness(this.deps.llm, { ...scope.model, prompt: stage.prompt, label: stage.label, base: stage.base,
+          () => proposeHarness(this.deps.llm, { ...model, prompt: stage.prompt, label: stage.label, base: stage.base,
             evidence: buildProposerEvidence({ ...evidence, harness: stage.base, rollouts: stage.reference, pool: stage.pool, library, original: originalEvidence(original) }), leakPaths: evidence.leakPaths })),
       });
       const rollouts = Object.entries(recursion.rollouts).map(([label, run]) => ({ label, run }));
@@ -231,7 +234,7 @@ export class EvolutionScheduler {
       const regressionCheck = judge?.winnerIsCandidate && diffs.length ? await this.regressions(scope, job, winningTree) : undefined;
       const entry = judge?.winnerIsCandidate && !regressionCheck?.failed
         ? await scope.stage("reflecting", winner, () => reflectAdoption(this.deps.llm, input.domain, buildReflectorEvidence({ ...evidence,
-          harness: winningTree, baseHarness: tree, rollouts: references, pool, library, winner, reason: judge.reasoning, original: originalEvidence(original) }), scope.model,
+          harness: winningTree, baseHarness: tree, rollouts: references, pool, library, winner, reason: judge.reasoning, original: originalEvidence(original) }), model,
           dryRun.useMock || judge.confidence === "low")) : undefined;
       const proposal: EvolutionProposal = { ...initial, status: regressionCheck?.failed ? "rejected" : entry ? "ready" : "archived_no_entry",
         blindJudge: dryRun.useMock && judge ? { ...judge, confidence: "low" } : judge, regressionCheck, experienceEntry: entry,

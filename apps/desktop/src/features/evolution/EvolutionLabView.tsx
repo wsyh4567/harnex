@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { EvolutionMode } from "@harnex/protocol";
 import {
   AtSign,
   Bot,
   CheckCircle2,
   Cpu,
+  Loader2,
   Play,
   Plus,
   Send,
   Slash,
   Sparkles,
 } from "lucide-react";
+import { ChoiceMenu } from "../../components/ui/ChoiceMenu.tsx";
+import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
 import { getEvolutionBlueprints } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
@@ -30,6 +34,8 @@ export function EvolutionLabView() {
     guidedBlueprintId,
     setGuidedBlueprint,
     guidedMessagesByBlueprint,
+    guidedLoading,
+    guidedSuggestedGoalByBlueprint,
     guidedModelOverride,
     setGuidedModelOverride,
     sendGuidedMessage,
@@ -47,6 +53,9 @@ export function EvolutionLabView() {
   const { locale, t } = useI18n();
 
   const [labTab, setLabTab] = useState<"guided" | "live">("guided");
+  const [depthPreset, setDepthPreset] = useState<"parallel:1" | "parallel:2" | "sequential:2">(
+    "parallel:2",
+  );
   const [goalByPillar, setGoalByPillar] = useState<Record<string, string>>({});
   const [assistantInput, setAssistantInput] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -59,7 +68,12 @@ export function EvolutionLabView() {
   const blueprints = getEvolutionBlueprints(locale);
   const activeBp = blueprints.find((b) => b.id === guidedBlueprintId) ?? blueprints[0]!;
   const goalText = goalByPillar[activeBp.id] ?? "";
+  const suggestedGoal = guidedSuggestedGoalByBlueprint[activeBp.id] ?? "";
   const chatTurns = guidedMessagesByBlueprint[activeBp.id] ?? [];
+
+  const [depthModeRaw, depthKRaw] = depthPreset.split(":");
+  const evolutionMode: EvolutionMode = depthModeRaw === "sequential" ? "sequential" : "parallel";
+  const evolutionK = Number(depthKRaw) || 2;
 
   const activeBinding =
     guidedModelOverride ?? appConfig?.slots.improver ?? appConfig?.slots.solver;
@@ -101,7 +115,14 @@ export function EvolutionLabView() {
         toggleSideChat(true);
       } else if (opt.action === "evolve") {
         setLabTab("live");
-        void triggerEvolution({ domain: activeBp.domain, mode: "parallel", k: 2 });
+        void triggerEvolution({
+          domain: activeBp.domain,
+          mode: evolutionMode,
+          k: evolutionK,
+          goal: goalText.trim() || undefined,
+          improverModelOverride: activeBinding?.modelId,
+          improverProviderIdOverride: activeBinding?.providerId,
+        });
       } else if (activeThreadId && opt.action === "mode_ask") {
         setThreadMode(activeThreadId, "ask");
       } else if (activeThreadId && opt.action === "mode_plan") {
@@ -172,7 +193,7 @@ export function EvolutionLabView() {
   const handleAskAssistant = (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmed = assistantInput.trim();
-    if (!trimmed) return;
+    if (!trimmed || guidedLoading) return;
     if (trimmed === "/btw" || trimmed.startsWith("/btw ")) {
       setAssistantInput("");
       setCursorPos(0);
@@ -185,10 +206,17 @@ export function EvolutionLabView() {
       setCursorPos(0);
       setMenuDismissedAt(null);
       setLabTab("live");
-      void triggerEvolution({ domain: activeBp.domain, mode: "parallel", k: 2 });
+      void triggerEvolution({
+        domain: activeBp.domain,
+        mode: evolutionMode,
+        k: evolutionK,
+        goal: goalText.trim() || undefined,
+        improverModelOverride: activeBinding?.modelId,
+        improverProviderIdOverride: activeBinding?.providerId,
+      });
       return;
     }
-    sendGuidedMessage(activeBp.id, trimmed, goalText, activeBinding);
+    void sendGuidedMessage(activeBp.id, trimmed, goalText, activeBinding);
     setAssistantInput("");
     setCursorPos(0);
     setMenuDismissedAt(null);
@@ -198,8 +226,11 @@ export function EvolutionLabView() {
     setLabTab("live");
     await triggerEvolution({
       domain: activeBp.domain,
-      mode: "parallel",
-      k: 2,
+      mode: evolutionMode,
+      k: evolutionK,
+      goal: goalText.trim() || undefined,
+      improverModelOverride: activeBinding?.modelId,
+      improverProviderIdOverride: activeBinding?.providerId,
     });
   };
 
@@ -339,21 +370,25 @@ export function EvolutionLabView() {
                   </div>
 
                   <div className="flex-1 space-y-3 overflow-y-auto p-4 text-xs">
-                    <div className="mr-8 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-3.5 py-2.5 leading-relaxed text-[var(--hx-text)]">
-                      {activeBp.starterReply}
+                    <div className="mr-8 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-3.5 py-2.5 text-[var(--hx-text)]">
+                      <MarkdownProse content={activeBp.starterReply} className="text-xs" />
                     </div>
 
                     {chatTurns.map((turn) => (
                       <div
                         key={turn.id}
                         className={cn(
-                          "whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 leading-relaxed",
+                          "rounded-2xl px-3.5 py-2.5 leading-relaxed",
                           turn.role === "user"
-                            ? "ml-10 border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] text-[var(--hx-text)]"
+                            ? "ml-10 whitespace-pre-wrap border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] text-[var(--hx-text)]"
                             : "mr-8 border border-[var(--hx-border)] bg-[var(--hx-subtle)] text-[var(--hx-text)]",
                         )}
                       >
-                        <div>{turn.content}</div>
+                        {turn.role === "assistant" ? (
+                          <MarkdownProse content={turn.content} className="text-xs" />
+                        ) : (
+                          <div>{turn.content}</div>
+                        )}
                         {turn.role === "assistant" && turn.modelId && (
                           <div className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-[var(--hx-border)] bg-[var(--hx-surface)]/80 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hx-text-3)]">
                             <Cpu className="h-2.5 w-2.5" />
@@ -362,6 +397,16 @@ export function EvolutionLabView() {
                         )}
                       </div>
                     ))}
+
+                    {guidedLoading && (
+                      <div
+                        data-testid="lab-architect-thinking"
+                        className="mr-8 inline-flex items-center gap-2 rounded-2xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-3.5 py-2.5 text-xs font-medium text-[var(--hx-accent)]"
+                      >
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span className="hx-shimmer">{t("lab.architectThinking")}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Composer matching TaskComposer craft, `/` & `@` completions, and Model Switcher */}
@@ -478,10 +523,14 @@ export function EvolutionLabView() {
                             <button
                               type="submit"
                               data-testid="lab-composer-submit"
-                              disabled={!assistantInput.trim()}
+                              disabled={!assistantInput.trim() || guidedLoading}
                               className="hx-pressable inline-flex items-center gap-1.5 rounded-xl bg-[var(--hx-text)] px-3.5 py-1.5 text-xs font-semibold text-[var(--hx-canvas)] hover:opacity-90 disabled:opacity-35"
                             >
-                              <Send className="h-3 w-3" />
+                              {guidedLoading ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Send className="h-3 w-3" />
+                              )}
                               <span>{t("lab.assistantSend")}</span>
                             </button>
                           </div>
@@ -493,9 +542,24 @@ export function EvolutionLabView() {
 
                 {/* Open Editable Evolution Goal & Expected Outcome */}
                 <div className="space-y-1.5">
-                  <label className="block text-[11px] font-semibold text-[var(--hx-text-2)]">
-                    {t("lab.goalLabel")}
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="block text-[11px] font-semibold text-[var(--hx-text-2)]">
+                      {t("lab.goalLabel")}
+                    </label>
+                    {suggestedGoal && (
+                      <button
+                        type="button"
+                        data-testid="use-suggested-goal-btn"
+                        onClick={() =>
+                          setGoalByPillar((prev) => ({ ...prev, [activeBp.id]: suggestedGoal }))
+                        }
+                        className="hx-pressable inline-flex items-center gap-1 rounded-full border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--hx-accent)] hover:opacity-90"
+                      >
+                        <Sparkles className="h-2.5 w-2.5" />
+                        <span>{t("lab.useSuggestedGoal")}</span>
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     rows={2}
                     data-testid="guided-goal-textarea"
@@ -510,7 +574,24 @@ export function EvolutionLabView() {
               </div>
 
               {/* Footer */}
-              <div className="flex items-center justify-end border-t border-[var(--hx-border)] bg-[var(--hx-surface)] px-5 py-3">
+              <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-[var(--hx-border)] bg-[var(--hx-surface)] px-5 py-3">
+                <ChoiceMenu
+                  testId="lab-depth-picker"
+                  ariaLabel={t("lab.depthLabel")}
+                  value={depthPreset}
+                  side="top-right"
+                  options={[
+                    { value: "parallel:1", label: t("lab.depthParallel1") },
+                    { value: "parallel:2", label: t("lab.depthParallel2") },
+                    { value: "sequential:2", label: t("lab.depthSequential2") },
+                  ]}
+                  onChange={(val) =>
+                    setDepthPreset(val as "parallel:1" | "parallel:2" | "sequential:2")
+                  }
+                  buttonClassName="rounded-xl px-3 py-1.5 text-xs"
+                  menuClassName="w-44"
+                />
+
                 <button
                   type="button"
                   disabled={evolutionRunning}

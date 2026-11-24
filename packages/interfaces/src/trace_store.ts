@@ -91,6 +91,7 @@ export class InMemoryTraceStore implements TraceStore {
   async deleteThread(threadId: string): Promise<void> {
     this.threads.delete(threadId);
     this.messages.delete(threadId);
+    for (const [runId, run] of this.runs) if (run.threadId === threadId) this.runs.delete(runId);
   }
 
   async appendMessage(message: ChatMessage): Promise<void> {

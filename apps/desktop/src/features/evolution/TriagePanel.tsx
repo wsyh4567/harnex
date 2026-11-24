@@ -174,11 +174,11 @@ export function TriagePanel({ onInspectDiff }: TriagePanelProps) {
                       >
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="text-[var(--hx-text-3)]">{kpi.label}</span>
-                          <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-300">
+                          <span className="hx-num font-mono font-semibold text-emerald-700 dark:text-emerald-300">
                             {kpi.delta}
                           </span>
                         </div>
-                        <div className="font-mono text-xs font-semibold text-[var(--hx-text)]">
+                        <div className="hx-num font-mono text-xs font-semibold text-[var(--hx-text)]">
                           {kpi.value}
                         </div>
                         <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--hx-muted)]">

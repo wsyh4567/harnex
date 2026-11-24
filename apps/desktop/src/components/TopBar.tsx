@@ -6,6 +6,7 @@ import {
   MessageSquarePlus,
   Moon,
   PanelLeftOpen,
+  Search,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -41,9 +42,14 @@ export function TopBar() {
     openOnboarding,
     toggleSideChat,
     sideChatOpen,
+    toggleCommandPalette,
   } = useCommandDeckStore();
   const { locale, setLocale, t } = useI18n();
   const [statusOpen, setStatusOpen] = useState(false);
+
+  const isMac =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform ?? "");
+  const shortcutLabel = isMac ? "⌘K" : "Ctrl K";
 
   const isTauriLive = ipc.mode === "tauri";
   const activeThread = threads.find((th) => th.id === activeThreadId) ?? null;
@@ -118,6 +124,20 @@ export function TopBar() {
 
       {/* Right: Quiet cluster */}
       <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          data-testid="command-palette-trigger"
+          title={`${t("cmdPalette.trigger")} (${shortcutLabel})`}
+          onClick={() => toggleCommandPalette(true)}
+          className="hx-pressable hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-1 text-[11px] text-[var(--hx-text-3)] hover:border-[var(--hx-border-strong)] hover:text-[var(--hx-text)]"
+        >
+          <Search className="h-3 w-3" />
+          <span className="hidden md:inline">{t("cmdPalette.trigger")}</span>
+          <kbd className="rounded border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-1 py-0 font-mono text-[10px] text-[var(--hx-text-2)]">
+            {shortcutLabel}
+          </kbd>
+        </button>
+
         <UpdatePill />
 
         {/* Compact System Status Pill + Popover */}
@@ -145,7 +165,7 @@ export function TopBar() {
                 {rsiMode === "auto" ? t("top.rsiAuto") : t("top.rsiManual")}
               </span>
               <span className="opacity-30">|</span>
-              <span className="font-mono">
+              <span className="hx-num font-mono">
                 {formatUsd(spent)}/{formatUsd(limit)}
               </span>
             </button>
@@ -209,7 +229,7 @@ export function TopBar() {
                     >
                       {costMeta.label}
                     </span>
-                    <span className="font-mono text-[11px] text-[var(--hx-text)]">
+                    <span className="hx-num font-mono text-[11px] text-[var(--hx-text)]">
                       {formatUsd(spent)} / {formatUsd(limit)}
                     </span>
                   </div>
@@ -217,7 +237,7 @@ export function TopBar() {
 
                 <div className="flex items-center justify-between pl-5 text-[11px] text-[var(--hx-text-3)]">
                   <span>{t("budget.tokensTodayLabel")}</span>
-                  <span className="font-mono text-[var(--hx-text-2)]">
+                  <span className="hx-num font-mono text-[var(--hx-text-2)]">
                     {formatTokens(tokensToday, locale)}
                   </span>
                 </div>

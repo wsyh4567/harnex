@@ -25,6 +25,7 @@ import { useI18n } from "../../i18n/index.ts";
 import { cn, formatTokens, shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { ApprovalCard } from "../security/ApprovalCard.tsx";
+import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { TaskComposer } from "./TaskComposer.tsx";
 
 function ToolCallItem({
@@ -342,9 +343,7 @@ export function ThreadWorkspace() {
                     </div>
                   )}
 
-                  <div className="whitespace-pre-wrap leading-relaxed text-[var(--hx-text)]">
-                    {loc.content}
-                  </div>
+                  <MarkdownProse content={loc.content} />
                 </div>
               );
             })}
@@ -353,7 +352,7 @@ export function ThreadWorkspace() {
               <div className="space-y-2.5 rounded-2xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] p-4 text-xs">
                 <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--hx-accent)]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>{t("chat.streaming", { runId: streaming.runId })}</span>
+                  <span className="hx-shimmer">{t("chat.streaming", { runId: streaming.runId })}</span>
                 </div>
                 {streaming.reasoning && (
                   <pre className="whitespace-pre-wrap rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 font-mono text-[11px] text-[var(--hx-text-2)]">
@@ -363,11 +362,7 @@ export function ThreadWorkspace() {
                 {streaming.toolCalls.map((tc) => (
                   <ToolCallItem key={tc.id} tc={tc} />
                 ))}
-                {streaming.content && (
-                  <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--hx-text)]">
-                    {streaming.content}
-                  </div>
-                )}
+                {streaming.content && <MarkdownProse content={streaming.content} />}
               </div>
             )}
 
@@ -424,7 +419,7 @@ export function ThreadWorkspace() {
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-[var(--hx-text-3)]">
                 <span>{t("chat.inspectorContext")}</span>
-                <span className="font-mono text-[var(--hx-text-2)]">{ctxPct}%</span>
+                <span className="hx-num font-mono text-[var(--hx-text-2)]">{ctxPct}%</span>
               </div>
               <div className="rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 space-y-1.5">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--hx-muted)]">
@@ -433,7 +428,7 @@ export function ThreadWorkspace() {
                     style={{ width: `${ctxPct}%` }}
                   />
                 </div>
-                <div className="font-mono text-[10px] text-[var(--hx-text-3)]">
+                <div className="hx-num font-mono text-[10px] text-[var(--hx-text-3)]">
                   {formatTokens(activeThread.contextUsedTokens)} /{" "}
                   {formatTokens(activeThread.contextMaxTokens)}
                 </div>

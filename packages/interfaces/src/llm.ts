@@ -23,6 +23,7 @@ export interface LlmMessage {
 export interface LlmRequest {
   slot: ModelSlot;
   modelId?: string;
+  providerIdOverride?: string;
   systemPrompt?: string;
   messages: LlmMessage[];
   tools?: LlmToolDef[];

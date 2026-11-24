@@ -37,6 +37,7 @@ export interface EvidenceCandidate extends EvidenceRollout { tree: HarnessTree; 
 
 export interface EvidenceInput {
   prompt: string;
+  goal?: string;
   source?: Record<string, string>;
   leakPaths?: readonly string[];
   sourceTags?: readonly UntrustedSourceTag[];
@@ -66,7 +67,8 @@ function buildBundle(input: EvidenceInput, files: Record<string, string>, tags: 
 }
 
 function commonFiles(input: EvidenceInput): Record<string, string> {
-  const files = { "task.md": input.prompt };
+  const files: Record<string, string> = { "task.md": input.prompt };
+  if (input.goal !== undefined) files["evolution_goal.md"] = input.goal;
   addTree(files, "source", input.source ?? {});
   return files;
 }

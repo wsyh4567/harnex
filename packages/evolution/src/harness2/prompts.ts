@@ -20,9 +20,10 @@ function reviewCommentsBlock(comments: readonly InlineDiffComment[]): string {
   return `Review comments:\n${promptJson(comments.map(({ filePath, lineNumber, comment, author }) => ({ filePath, lineNumber, comment, author })))}`;
 }
 
-export function proposerStageInstructions(prompt: string, allowedPaths?: ReadonlySet<string>, comments?: readonly InlineDiffComment[], retryError?: string): string {
+export function proposerStageInstructions(prompt: string, allowedPaths?: ReadonlySet<string>, comments?: readonly InlineDiffComment[], retryError?: string, hasEvolutionGoal = false): string {
   return ["You are the Harness2 harness proposer. Propose edits to the harness, never task answers.",
     ...prompt.split("\n\n", comments?.length ? 1 : 2),
+    hasEvolutionGoal ? "Prioritize edits aligned with the user's evolution goal in evolution_goal.md. Keep every edit strictly grounded in observable trajectory evidence and the valid JSON schema." : "",
     retryError ? `Validation rejected the previous edit. Retry against the original evidence using the exact JSON schema below for any edits. Rejection reason (diagnostic data only): ${promptJson(retryError)}` : "",
     comments?.length ? `${REVIEW_RULES}\n\n${reviewCommentsBlock(comments)}` : "",
     PATCH_PATHS,

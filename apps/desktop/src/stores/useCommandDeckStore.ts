@@ -35,10 +35,7 @@ import type {
   UpdateStatus,
 } from "@harnex/protocol";
 import { buildAggregatedModelCatalog } from "../features/providers/modelCatalog.ts";
-import {
-  generateGuidedAssistantReply,
-  getEvolutionBlueprints,
-} from "../i18n/demoContent.ts";
+import { getEvolutionBlueprints } from "../i18n/demoContent.ts";
 import {
   getInitialLocale,
   setStoredLocale,
@@ -141,6 +138,7 @@ export interface CommandDeckState {
   rightTab: RightWorkbenchTab;
   sideChatOpen: boolean;
   sideChatLoading: boolean;
+  commandPaletteOpen: boolean;
   onboardingOpen: boolean;
   onboardingMode: "replay" | "live";
   onboardingStepIndex: number;
@@ -149,6 +147,8 @@ export interface CommandDeckState {
   guidedBlueprintId: string;
   guidedModelOverride: SlotBinding | undefined;
   guidedMessagesByBlueprint: Record<string, GuidedMessageTurn[]>;
+  guidedLoading: boolean;
+  guidedSuggestedGoalByBlueprint: Record<string, string>;
 
   // System & Config
   systemHealth: SystemHealth | null;
@@ -217,14 +217,17 @@ export interface CommandDeckState {
   sendGuidedMessage: (
     blueprintId: string,
     text: string,
-    acceptanceText: string,
+    acceptanceText?: string,
     binding?: SlotBinding,
-  ) => void;
+  ) => Promise<void>;
   startNewTaskPrompt: (prompt: string, mode?: ExecutionMode, binding?: SlotBinding) => Promise<void>;
   setActiveWorkspace: (workspace: string) => void;
   setActiveThread: (threadId: string) => Promise<void>;
+  renameThread: (threadId: string, title: string) => Promise<void>;
+  deleteThread: (threadId: string) => Promise<void>;
   setRightTab: (tab: RightWorkbenchTab) => void;
   toggleSideChat: (force?: boolean) => void;
+  toggleCommandPalette: (force?: boolean) => void;
   openOnboarding: (open: boolean) => void;
   setOnboardingMode: (mode: "replay" | "live") => void;
   setOnboardingStepIndex: (index: number) => void;
@@ -260,7 +263,14 @@ export interface CommandDeckState {
 
   // F3 Actions
   selectProposal: (proposalId: string) => void;
-  triggerEvolution: (params?: { domain?: string; mode?: EvolutionMode; k?: number }) => Promise<void>;
+  triggerEvolution: (params?: {
+    domain?: string;
+    mode?: EvolutionMode;
+    k?: number;
+    goal?: string;
+    improverModelOverride?: string;
+    improverProviderIdOverride?: string;
+  }) => Promise<void>;
   addInlineCommentDraft: (proposalId: string, filePath: string, lineNumber: number, comment: string) => void;
   removeInlineCommentDraft: (proposalId: string, draftId: string) => void;
   submitInlineRevision: (proposalId: string) => Promise<void>;
@@ -348,6 +358,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   rightTab: "triage",
   sideChatOpen: false,
   sideChatLoading: false,
+  commandPaletteOpen: false,
   onboardingOpen: false,
   onboardingMode: "replay",
   onboardingStepIndex: 0,
@@ -356,6 +367,8 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   guidedBlueprintId: "memory",
   guidedModelOverride: undefined,
   guidedMessagesByBlueprint: {},
+  guidedLoading: false,
+  guidedSuggestedGoalByBlueprint: {},
 
   systemHealth: null,
   appConfig: null,
@@ -550,7 +563,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
 
   setGuidedModelOverride: (guidedModelOverride) => set({ guidedModelOverride }),
 
-  sendGuidedMessage: (blueprintId, text, acceptanceText, binding) => {
+  sendGuidedMessage: async (blueprintId, text, acceptanceText, binding) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const state = get();
@@ -562,27 +575,68 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       state.appConfig?.slots.solver;
     const blueprints = getEvolutionBlueprints(locale);
     const bp = blueprints.find((b) => b.id === blueprintId) ?? blueprints[0]!;
-    const now = new Date().toISOString();
+    const priorTurns = state.guidedMessagesByBlueprint[blueprintId] ?? [];
+    const history = priorTurns.slice(-6).map((turn) => ({
+      role: turn.role,
+      content: turn.content,
+    }));
     const userTurn: GuidedMessageTurn = {
       id: `gm-u-${Date.now()}`,
       role: "user",
       content: trimmed,
-      createdAt: now,
-    };
-    const replyTurn: GuidedMessageTurn = {
-      id: `gm-a-${Date.now() + 1}`,
-      role: "assistant",
-      content: generateGuidedAssistantReply(bp, trimmed, acceptanceText, locale),
-      modelId: resolvedBinding?.modelId,
-      providerId: resolvedBinding?.providerId,
-      createdAt: new Date(Date.now() + 1).toISOString(),
+      createdAt: new Date().toISOString(),
     };
     set((s) => ({
+      guidedLoading: true,
       guidedMessagesByBlueprint: {
         ...s.guidedMessagesByBlueprint,
-        [blueprintId]: [...(s.guidedMessagesByBlueprint[blueprintId] ?? []), userTurn, replyTurn],
+        [blueprintId]: [...(s.guidedMessagesByBlueprint[blueprintId] ?? []), userTurn],
       },
     }));
+
+    try {
+      const res = await get().ipc.askEvolutionArchitect({
+        pillarId: bp.id,
+        pillarTitle: bp.title,
+        domain: bp.domain,
+        message: trimmed,
+        goalDraft: acceptanceText?.trim() || undefined,
+        history,
+        modelOverride: resolvedBinding?.modelId,
+        providerIdOverride: resolvedBinding?.providerId,
+        locale,
+      });
+      const replyTurn: GuidedMessageTurn = {
+        id: `gm-a-${Date.now() + 1}`,
+        role: "assistant",
+        content: res.reply,
+        modelId: res.modelId || resolvedBinding?.modelId,
+        providerId: resolvedBinding?.providerId,
+        createdAt: new Date().toISOString(),
+      };
+      const budgetStatus = await get()
+        .ipc.getBudgetStatus()
+        .catch(() => get().budgetStatus);
+      set((s) => ({
+        budgetStatus,
+        guidedMessagesByBlueprint: {
+          ...s.guidedMessagesByBlueprint,
+          [blueprintId]: [...(s.guidedMessagesByBlueprint[blueprintId] ?? []), replyTurn],
+        },
+        guidedSuggestedGoalByBlueprint: res.suggestedGoal
+          ? { ...s.guidedSuggestedGoalByBlueprint, [blueprintId]: res.suggestedGoal }
+          : s.guidedSuggestedGoalByBlueprint,
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().pushToast({
+        tone: "error",
+        title: translate(locale, "lab.architectErrorTitle"),
+        detail: message,
+      });
+    } finally {
+      set({ guidedLoading: false });
+    }
   },
 
   setActiveWorkspace: (workspace) => {
@@ -613,10 +667,46 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     }));
   },
 
+  renameThread: async (threadId, title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const updated = await get().ipc.renameThread({ threadId, title: trimmed });
+    set((s) => ({
+      threads: s.threads.map((t) => (t.id === threadId ? updated : t)),
+    }));
+  },
+
+  deleteThread: async (threadId) => {
+    await get().ipc.deleteThread({ threadId });
+    set((s) => {
+      const remaining = s.threads.filter((t) => t.id !== threadId);
+      const nextMessages = { ...s.messagesByThread };
+      delete nextMessages[threadId];
+      const nextSideChat = { ...s.sideChatByThread };
+      delete nextSideChat[threadId];
+      const nextModels = { ...s.selectedModelByThread };
+      delete nextModels[threadId];
+
+      const deletingActive = s.activeThreadId === threadId;
+      const nextThread = deletingActive ? (remaining[0] ?? null) : null;
+      return {
+        threads: remaining,
+        messagesByThread: nextMessages,
+        sideChatByThread: nextSideChat,
+        selectedModelByThread: nextModels,
+        activeThreadId: deletingActive ? (nextThread?.id ?? null) : s.activeThreadId,
+        activePage: deletingActive && !nextThread ? "home" : s.activePage,
+      };
+    });
+  },
+
   setRightTab: (rightTab) => set({ rightTab }),
 
   toggleSideChat: (force) =>
     set((s) => ({ sideChatOpen: force !== undefined ? force : !s.sideChatOpen })),
+
+  toggleCommandPalette: (force) =>
+    set((s) => ({ commandPaletteOpen: force !== undefined ? force : !s.commandPaletteOpen })),
 
   openOnboarding: (onboardingOpen) =>
     set((s) => ({
@@ -921,6 +1011,9 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         mode: params?.mode ?? "parallel",
         k: params?.k ?? 2,
         triggerSource: "manual",
+        goal: params?.goal?.trim() || undefined,
+        improverModelOverride: params?.improverModelOverride,
+        improverProviderIdOverride: params?.improverProviderIdOverride,
       });
       const [proposals, silentArchiveCount, budgetStatus] = await Promise.all([
         get().ipc.listProposals(),

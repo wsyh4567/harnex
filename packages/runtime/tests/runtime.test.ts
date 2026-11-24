@@ -631,6 +631,38 @@ describe("SQLite trace store", () => {
     expect(migrated.query("SELECT version FROM schemaVersion ORDER BY version").all()).toEqual([{ version: 1 }, { version: 2 }]);
     migrated.close();
   });
+
+  test("deleteThread cascades messages and trace runs cleanly", async () => {
+    const store = new SqliteTraceStore(":memory:");
+    try {
+      const thread = ThreadSchema.parse({ id: "thr-del", workspacePath: "/work", title: "Temp", mode: "craft", pinnedCommitSha: "a".repeat(40), status: "idle", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" });
+      await store.upsertThread(thread);
+      await store.appendMessage({ id: "msg-del", threadId: "thr-del", role: "user", content: "hello", createdAt: "2026-01-01T00:00:01Z" });
+      await store.saveTraceRun({ runId: "run-del", threadId: "thr-del", domain: "general", pinnedCommitSha: "a".repeat(40), prompt: "hello", trajectoryMarkdown: "# trace", finalOutput: "ok", succeeded: true, hadHumanSteer: false, steerInstructions: [], touchedFiles: [], sourceTags: ["local"], metrics: { steps: 1, errors: 0, durationMs: 5, tokens: 10, costUsd: 0 }, createdAt: "2026-01-01T00:00:02Z" });
+      await store.deleteThread("thr-del");
+      expect(await store.getThread("thr-del")).toBeNull();
+      expect(await store.listMessages("thr-del")).toEqual([]);
+      expect(await store.listTraceRunsByThread("thr-del")).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  test("ping returns actionable error diagnostics for 401, 404, 502 and network failures without leaking secrets", async () => {
+    const bridge = { keyringGet: async () => "sk-super-secret-value" };
+    let status = 401;
+    const registry = new ProviderRegistry(bridge, {
+      keyCooldownMs: 0,
+      fetch: mockFetch(async () => new Response("denied", { status })),
+    });
+    registry.upsert(ProviderConfigSchema.parse({ id: "p1", name: "P1", kind: "openai_compatible", baseUrl: "https://api.example.test/v1", keyringRef: "prov-key", models: ["m1"] }));
+    const r401 = await registry.ping("p1");
+    expect(r401.ok).toBe(false);
+    expect(r401.error).toContain("401");
+    expect(r401.error).not.toContain("sk-super-secret");
+    status = 404;
+    expect((await registry.ping("p1")).error).toContain("404");
+    status = 502;
+    expect((await registry.ping("p1")).error).toContain("502");
+  });
 });
 
 describe("harness slots", () => {

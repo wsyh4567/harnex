@@ -36,6 +36,27 @@ function httpStatus(error: unknown): number | undefined {
   return direct ?? Number(/^got status: (\d{3})\b/.exec(error.message)?.[1]);
 }
 
+function pingFailure(error: unknown): string {
+  const status = httpStatus(error);
+  if (status === 401 || status === 403) return `Authentication failed (HTTP ${status}). Check the API key and provider permissions.`;
+  if (status === 404) return "Provider endpoint not found (HTTP 404). Check the base URL and API path.";
+  if (status === 429) return "Provider rate limit reached (HTTP 429). Check quota or retry after the limit resets.";
+  if (status === 502 || status === 503 || status === 504) return `Provider gateway unavailable (HTTP ${status}). Check the upstream service and retry.`;
+  if (status) return `Provider request failed (HTTP ${status}). Check the provider configuration.`;
+  const value = error as { name?: unknown; code?: unknown; cause?: { code?: unknown; name?: unknown }; message?: unknown } | null;
+  const name = typeof value?.name === "string" ? value.name : "";
+  const code = typeof value?.code === "string" ? value.code : typeof value?.cause?.code === "string" ? value.cause.code : "";
+  const message = typeof value?.message === "string" ? value.message : "";
+  if (/timeout|timed out/i.test(name) || /timeout|timed out|ETIMEDOUT|ESOCKETTIMEDOUT/i.test(`${code} ${message}`)) {
+    return "Provider request timed out. Check the endpoint and network, then retry.";
+  }
+  if (/^(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ERR_NETWORK)$/i.test(code) ||
+    /fetch failed|network|connection refused|could not resolve/i.test(message) || error instanceof TypeError) {
+    return "Provider is unreachable. Check the base URL, network connection, and whether the service is running.";
+  }
+  return "Provider connection failed. Check the base URL, credentials, and provider availability.";
+}
+
 class ProviderHttpError extends Error {
   constructor(readonly status: number) { super(`Provider returned HTTP ${status}`); }
 }
@@ -339,7 +360,7 @@ export class ProviderRegistry {
       if (provider) this.upsert({ ...provider, models, lastPingMs: latencyMs });
       return { ok: true, latencyMs };
     } catch (error) {
-      return { ok: false, latencyMs: elapsed(), error: error instanceof Error ? error.message : String(error) };
+      return { ok: false, latencyMs: elapsed(), error: pingFailure(error) };
     }
   }
 }

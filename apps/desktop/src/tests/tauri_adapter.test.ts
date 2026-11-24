@@ -435,4 +435,136 @@ describe("TauriIpcAdapter 1:1 Parity with tray.rs & Runtime Selection", () => {
       { cmd: "hooks_delete", args: { path: "hooks/trim.ts" } },
     ]);
   });
+
+  it("invokes evolution.architect_chat, thread.rename, thread.delete, and forwards evolution.trigger overrides", async () => {
+    const adapter = new TauriIpcAdapter();
+    invokeResponseFactory = (cmd, args) => {
+      if (cmd !== "sidecar_rpc") return undefined;
+      if (args?.method === "evolution.architect_chat") {
+        return {
+          reply: "Grounded in `memory/LongTermMEMORY.md`: add strict schema check.",
+          suggestedGoal: "Validate CSV columns via csv-audit skill with 0 errors.",
+          modelId: "claude-sonnet-4-5",
+          usage: {
+            inputTokens: 210,
+            outputTokens: 64,
+            cachedInputTokens: 0,
+            reasoningTokens: 0,
+            costUsd: 0.0018,
+          },
+        };
+      }
+      if (args?.method === "thread.rename") {
+        return {
+          id: "thr-1",
+          workspacePath: "~/Work",
+          title: "Renamed Billing Audit",
+          mode: "craft",
+          status: "idle",
+          pinnedCommitSha: "a7f3c91",
+          domain: "file_ops",
+          goals: [],
+          contextUsedTokens: 0,
+          contextMaxTokens: 128000,
+          sourceTags: ["local"],
+          hadHumanSteer: false,
+          createdAt: "2026-11-24T00:00:00Z",
+          updatedAt: "2026-11-24T00:01:00Z",
+        };
+      }
+      if (args?.method === "evolution.trigger") {
+        return {
+          id: "prop-99",
+          threadId: "thr-1",
+          domain: "memory",
+          title: "Goal-driven memory evolution",
+          mode: "parallel",
+          k: 2,
+          triggerSource: "manual",
+          sourceTags: ["local"],
+          requiresHumanTrust: false,
+          baseCommitSha: "a7f3c91",
+          status: "ready",
+          metricsBefore: { steps: 4, errors: 1, durationMs: 5000, tokens: 1200, costUsd: 0.01 },
+          metricsAfter: { steps: 2, errors: 0, durationMs: 2500, tokens: 800, costUsd: 0.006 },
+          diffs: [],
+          inlineComments: [],
+          createdAt: "2026-11-24T00:00:00Z",
+          updatedAt: "2026-11-24T00:01:00Z",
+        };
+      }
+      return undefined;
+    };
+
+    const arch = await adapter.askEvolutionArchitect({
+      pillarId: "memory",
+      pillarTitle: "1. Memory System",
+      domain: "memory",
+      message: "Prevent duplicate memory entries",
+      goalDraft: "Deduplicate facts",
+      history: [{ role: "user", content: "Earlier note" }],
+      modelOverride: "claude-sonnet-4-5",
+      providerIdOverride: "prov-anthropic",
+      locale: "en-US",
+    });
+    expect(arch.suggestedGoal).toContain("csv-audit");
+    expect(arch.modelId).toBe("claude-sonnet-4-5");
+
+    const renamed = await adapter.renameThread({
+      threadId: "thr-1",
+      title: "Renamed Billing Audit",
+    });
+    expect(renamed.title).toBe("Renamed Billing Audit");
+
+    await adapter.deleteThread({ threadId: "thr-1" });
+
+    await adapter.triggerEvolution({
+      threadId: "thr-1",
+      domain: "memory",
+      mode: "parallel",
+      k: 2,
+      triggerSource: "manual",
+      goal: "Deduplicate facts cleanly",
+      improverModelOverride: "claude-sonnet-4-5",
+      improverProviderIdOverride: "prov-anthropic",
+    });
+
+    expect(recordedInvokes.map((c) => c.args)).toEqual([
+      {
+        method: "evolution.architect_chat",
+        params: {
+          pillarId: "memory",
+          pillarTitle: "1. Memory System",
+          domain: "memory",
+          message: "Prevent duplicate memory entries",
+          goalDraft: "Deduplicate facts",
+          history: [{ role: "user", content: "Earlier note" }],
+          modelOverride: "claude-sonnet-4-5",
+          providerIdOverride: "prov-anthropic",
+          locale: "en-US",
+        },
+      },
+      {
+        method: "thread.rename",
+        params: { threadId: "thr-1", title: "Renamed Billing Audit" },
+      },
+      {
+        method: "thread.delete",
+        params: { threadId: "thr-1" },
+      },
+      {
+        method: "evolution.trigger",
+        params: {
+          threadId: "thr-1",
+          domain: "memory",
+          mode: "parallel",
+          k: 2,
+          triggerSource: "manual",
+          goal: "Deduplicate facts cleanly",
+          improverModelOverride: "claude-sonnet-4-5",
+          improverProviderIdOverride: "prov-anthropic",
+        },
+      },
+    ]);
+  });
 });

@@ -59,6 +59,7 @@ export class SqliteTraceStore implements TraceStore {
   async deleteThread(threadId: string): Promise<void> {
     this.db.transaction(() => {
       this.db.run("DELETE FROM messages WHERE thread_id = ?", [threadId]);
+      this.db.run("DELETE FROM runs WHERE thread_id = ?", [threadId]);
       this.db.run("DELETE FROM threads WHERE id = ?", [threadId]);
     })();
   }

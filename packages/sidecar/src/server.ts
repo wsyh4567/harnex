@@ -3,8 +3,9 @@ import { dirname, join, resolve } from "node:path";
 import { InMemoryHarnessStore, type HarnessStore, type LlmClient, type TaskRunResult, type TraceStore } from "@harnex/interfaces";
 import {
   AppConfigSchema, EvolutionProposalActionParamsSchema, EvolutionReviseParamsSchema, EvolutionTriggerParamsSchema, HarnessCompatibilityReportSchema,
-  OnboardingReplayTraceSchema, PricingSyncParamsSchema, ReplayCompareParamsSchema, RpcErrorCode, RsiModeSchema,
-  RunnerControlParamsSchema, RunnerStartParamsSchema, RunnerSteerParamsSchema, SideChatAskParamsSchema, ThreadCreateParamsSchema, ThreadSchema,
+  EvolutionArchitectAskParamsSchema, EvolutionArchitectAskResultSchema, OnboardingReplayTraceSchema, PricingSyncParamsSchema, ReplayCompareParamsSchema,
+  RpcErrorCode, RsiModeSchema, RunnerControlParamsSchema, RunnerStartParamsSchema, RunnerSteerParamsSchema, SideChatAskParamsSchema,
+  ThreadCreateParamsSchema, ThreadDeleteParamsSchema, ThreadRenameParamsSchema, ThreadSchema,
   type AppConfig, type EvolutionProposal, type ProviderImportResult, type ReplayComparison, type Thread,
 } from "@harnex/protocol";
 import { EvolutionScheduler, inspectHarnessCompatibility, probeTask, withShadowWorkspace } from "@harnex/evolution";
@@ -27,6 +28,39 @@ const magpieOptions = z.object({ gatewayUrl: required.optional(), importLink: re
 const slots = ["solver", "improver", "judge"] as const;
 const now = () => new Date().toISOString();
 const invalid = (message: string) => new RpcFailure(RpcErrorCode.InvalidParams, message);
+const ORGAN_PATH = /^(?:systemprompt\.md|guardrails\.md|memory\/LongTermMEMORY\.md|mcp\/servers\.json|skills\/.*\/SKILL\.md|hooks\/.*\.ts)$/i;
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let result = "", used = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char);
+    if (used + size > maxBytes) break;
+    result += char;
+    used += size;
+  }
+  return result;
+}
+
+function harnessSummary(tree: Record<string, string>): string {
+  const paths = Object.keys(tree).sort();
+  const fileList = truncateUtf8(paths.join("\n") || "(no files)", 1800);
+  const ordered = paths.filter(path => ORGAN_PATH.test(path)).sort((a, b) => {
+    const priority = (path: string) => path === "systemprompt.md" ? 0 : path === "guardrails.md" ? 1 : path === "mcp/servers.json" ? 2 :
+      path === "memory/LongTermMEMORY.md" ? 3 : path.startsWith("skills/") ? 4 : 5;
+    return priority(a) - priority(b) || a.localeCompare(b);
+  });
+  const excerpts: string[] = [];
+  let remaining = 4200;
+  for (const path of ordered) {
+    const safeContent = tree[path]!.replace(/("(?:api[_-]?key|token|secret|password|authorization)"\s*:\s*")[^\"]*(")/gi, "$1[redacted]$2");
+    const excerpt = truncateUtf8(safeContent.replace(/\s+/g, " ").trim(), 360);
+    const block = `\n### ${path}\n${excerpt || "(empty)"}\n`;
+    if (Buffer.byteLength(block) > remaining) continue;
+    excerpts.push(block);
+    remaining -= Buffer.byteLength(block);
+  }
+  return truncateUtf8(`Active harness files at HEAD:\n${fileList}\n\nOrgan excerpts:${excerpts.join("")}`, 6000);
+}
 
 interface ForegroundRun {
   triggerEvolution: boolean;
@@ -55,6 +89,7 @@ export class SidecarServer {
   private readonly harness: HarnessStore;
   private readonly runner: ShadowBoundRunner;
   private readonly scheduler: EvolutionScheduler;
+  private readonly llm: LlmClient;
   private readonly running = new Map<string, ForegroundRun>();
   private readonly activeProposals = new Set<string>();
   private readonly activeWork = new Set<Promise<unknown>>();
@@ -76,11 +111,11 @@ export class SidecarServer {
       this.bindSlots(this.config);
       if (!options.trace) this.ownedTrace = new SqliteTraceStore(path);
       this.trace = options.trace ?? this.ownedTrace!;
-      const llm = options.llm ?? new RoutedLlmClient(this.registry);
+      this.llm = options.llm ?? new RoutedLlmClient(this.registry);
       this.harness = new InMemoryHarnessStore(this.bridge);
-      const runner = new ForegroundTaskRunner({ bridge: this.bridge, llm, harness: this.harness, trace: this.trace });
+      const runner = new ForegroundTaskRunner({ bridge: this.bridge, llm: this.llm, harness: this.harness, trace: this.trace });
       this.runner = new ShadowBoundRunner(runner, this.bridge);
-      this.scheduler = new EvolutionScheduler({ bridge: this.bridge, llm, runner: this.runner, harnessStore: this.harness, traceStore: this.trace });
+      this.scheduler = new EvolutionScheduler({ bridge: this.bridge, llm: this.llm, runner: this.runner, harnessStore: this.harness, traceStore: this.trace });
       this.bridge.onEvent = (event) => {
         if (event.type === "runner.started") this.running.get(event.threadId)?.started(event.runId);
         if (event.type === "runner.completed") {
@@ -312,6 +347,20 @@ export class SidecarServer {
         case "thread.list": return await this.trace.listThreads();
         case "thread.messages": return await this.trace.listMessages(RunnerControlParamsSchema.parse(params).threadId);
         case "thread.create": return await this.createThread(threadCreate.parse(params));
+        case "thread.rename": return await this.mutate(async () => {
+          const { threadId, title } = ThreadRenameParamsSchema.parse(params);
+          const thread = await this.getThread(threadId);
+          const updated = ThreadSchema.parse({ ...thread, title, updatedAt: now() });
+          await this.trace.upsertThread(updated);
+          return updated;
+        });
+        case "thread.delete": return await this.mutate(async () => {
+          const { threadId } = ThreadDeleteParamsSchema.parse(params);
+          await this.getThread(threadId);
+          if (this.running.has(threadId)) throw invalid(`A run is active for thread: ${threadId}`);
+          await this.trace.deleteThread(threadId);
+          this.liveRequests.delete(threadId);
+        });
         case "runner.start": {
           const input = RunnerStartParamsSchema.parse(params);
           return await this.start(await this.getThread(input.threadId), input);
@@ -343,6 +392,25 @@ export class SidecarServer {
           return await this.scheduler.triggerMigration({ report: report ?? await this.checkCompatibility(), threadId, workspacePath });
         }
         case "evolution.trigger": return (await this.scheduler.run(EvolutionTriggerParamsSchema.parse(params))).proposal;
+        case "evolution.architect_chat": {
+          const input = EvolutionArchitectAskParamsSchema.parse(params);
+          const head = await this.harness.readTreeAt(await this.harness.getHeadSha());
+          const locale = input.locale === "en-US" ? "English (en-US)" : "Simplified Chinese (zh-CN)";
+          const systemPrompt = `You are the Harness2 Evolution Architect. Help the user refine a concrete, testable evolution goal for the ${input.pillarTitle} pillar (${input.pillarId}) in the ${input.domain} domain. Ground recommendations in the current harness organs summarized below; name relevant files and observable outcomes, and do not claim facts that the summary does not show. Keep the goal focused, actionable, and verifiable against recorded task trajectories. Ask a concise follow-up when essential details are missing. Reply in ${locale}. You may end with one <suggested_goal>...</suggested_goal> block containing a concise goal draft.\n\n${harnessSummary(head)}`;
+          const messages = [
+            ...input.history.map(({ role, content }) => ({ role, content })),
+            { role: "user" as const, content: `${JSON.stringify({ pillarId: input.pillarId, pillarTitle: input.pillarTitle,
+              domain: input.domain, goalDraft: input.goalDraft, message: input.message })}\n\n<TRUSTED_ARCHITECT_INSTRUCTIONS>\nReply concisely in ${locale} with concrete, verifiable Harness2 suggestions grounded in the current harness organs summarized in the system prompt. Optionally end with one <suggested_goal>...</suggested_goal> block containing a crisp goal draft.\n</TRUSTED_ARCHITECT_INSTRUCTIONS>` },
+          ];
+          const response = await this.llm.complete({ slot: "improver", modelId: input.modelOverride,
+            providerIdOverride: input.providerIdOverride, systemPrompt, messages });
+          await this.bridge.recordUsage(response.modelId, response.usage);
+          const match = /\s*<suggested_goal>([\s\S]*?)<\/suggested_goal>\s*$/i.exec(response.content);
+          const suggestedGoal = match?.[1]?.trim();
+          const reply = match ? response.content.slice(0, match.index).trimEnd() : response.content;
+          return EvolutionArchitectAskResultSchema.parse({ reply, suggestedGoal: suggestedGoal && suggestedGoal.length <= 4000 ? suggestedGoal : undefined,
+            modelId: response.modelId, usage: response.usage });
+        }
         case "evolution.revise_with_comments": {
           const { proposalId, comments } = EvolutionReviseParamsSchema.parse(params);
           return await this.proposalAction(proposalId, () => this.scheduler.reviseWithInlineComments(proposalId, comments));
@@ -389,9 +457,9 @@ export class SidecarServer {
         });
         case "provider.ping": return await this.mutate(async () => {
           const { providerId: id } = providerId.parse(params);
-          const { ok, latencyMs } = await this.registry.ping(id);
+          const { ok, latencyMs, error } = await this.registry.ping(id);
           if (ok) this.persist();
-          return { providerId: id, ok, latencyMs };
+          return { providerId: id, ok, latencyMs, error };
         });
         case "provider.fetch_models": return await this.mutate(async () => {
           const { providerId: id } = providerId.parse(params);

@@ -305,11 +305,11 @@ export function ProposalsView() {
                       >
                         <div className="flex items-center justify-between gap-2 text-[11px]">
                           <span className="text-[var(--hx-text-3)]">{kpi.label}</span>
-                          <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                          <span className="hx-num rounded-md bg-emerald-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
                             {kpi.delta}
                           </span>
                         </div>
-                        <div className="font-mono text-sm font-semibold text-[var(--hx-text)]">
+                        <div className="hx-num font-mono text-sm font-semibold text-[var(--hx-text)]">
                           {kpi.value}
                         </div>
                         <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--hx-muted)]">

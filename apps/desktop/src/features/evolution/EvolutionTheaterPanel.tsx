@@ -101,7 +101,7 @@ export function EvolutionTheaterPanel() {
             {evolutionRunning && (
               <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--hx-accent)]">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                {t("theater.evolving")}
+                <span className="hx-shimmer">{t("theater.evolving")}</span>
               </span>
             )}
             <button
@@ -207,7 +207,7 @@ export function EvolutionTheaterPanel() {
         )}
 
         {theaterLiveMetrics && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50/70 px-3.5 py-2 font-mono text-[11px] text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <div className="hx-num flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-50/70 px-3.5 py-2 font-mono text-[11px] text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200">
             <span>{t("theater.cowSnapshot")}</span>
             <span>
               {theaterLiveMetrics.steps} {t("evo.steps")} · {theaterLiveMetrics.errors}{" "}

@@ -364,6 +364,43 @@ test("validates and loads the onboarding replay and launches live work with the 
   } finally { await app.close(); }
 }));
 
+test("supports thread.rename, thread.delete, evolution.architect_chat and actionable ping errors", () => fixture(async (root) => {
+  const llm = new MockLlmClient(async (req) => {
+    expect(req.slot).toBe("improver");
+    expect(req.modelId).toBe("deepseek-v4.1-flash");
+    expect(req.providerIdOverride).toBe("prov-demo");
+    expect(req.systemPrompt).toContain("systemprompt.md");
+    return {
+      content: "Add a deterministic BOM check skill before writing CSV.\n<suggested_goal>Always detect UTF-8 BOM / GB18030 before parsing CSV files</suggested_goal>",
+      toolCalls: [],
+      modelId: "deepseek-v4.1-flash",
+      finishReason: "stop",
+      usage: { inputTokens: 120, outputTokens: 40, cachedInputTokens: 0, reasoningTokens: 0, costUsd: 0.0001 },
+    };
+  });
+  const fetch = (async () => new Response("unauthorized", { status: 401 })) as unknown as typeof globalThis.fetch;
+  const app = connect({ llm, fetch });
+  try {
+    const created = await app.call<Thread>("thread.create", { workspacePath: root, title: "Draft Thread", mode: "craft" });
+    const renamed = await app.call<Thread>("thread.rename", { threadId: created.id, title: "Invoice Audit" });
+    expect(renamed.title).toBe("Invoice Audit");
+    const arch = await app.call<{ reply: string; suggestedGoal?: string; modelId: string }>("evolution.architect_chat", {
+      pillarId: "skills", pillarTitle: "Skills", domain: "file_ops", message: "CSV encoding keeps breaking",
+      modelOverride: "deepseek-v4.1-flash", providerIdOverride: "prov-demo", locale: "en-US",
+    });
+    expect(arch.reply).toContain("deterministic BOM check");
+    expect(arch.reply).not.toContain("<suggested_goal>");
+    expect(arch.suggestedGoal).toBe("Always detect UTF-8 BOM / GB18030 before parsing CSV files");
+    expect(arch.modelId).toBe("deepseek-v4.1-flash");
+    await app.call("thread.delete", { threadId: created.id });
+    expect((await app.call<Thread[]>("thread.list")).some((t) => t.id === created.id)).toBe(false);
+    await app.call("provider.save", { provider: { id: "bad-key", name: "Bad", kind: "openai_compatible", baseUrl: "http://localhost:4001/v1" }, apiKey: "sk-bad" });
+    const ping = await app.call<{ ok: boolean; error?: string }>("provider.ping", { providerId: "bad-key" });
+    expect(ping.ok).toBe(false);
+    expect(ping.error).toContain("401");
+  } finally { await app.close(); }
+}));
+
 test("compiled sidecar reads fragmented NDJSON and returns the bundled replay from another working directory", () => fixture(async (root) => {
   const exe = join(root, "sidecar.exe"), src = resolve(import.meta.dir, "../src/index.ts");
   const build = Bun.spawn([process.execPath, "build", "--compile", src, "--outfile", exe], { stdout: "pipe", stderr: "pipe" });
