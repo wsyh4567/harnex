@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EvolutionMode, EvolutionStage } from "@harnex/protocol";
 import {
+  ArrowRight,
   BookOpen,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  FileCode2,
   Film,
   FlaskConical,
   Loader2,
@@ -27,6 +29,7 @@ const PIPELINE_STAGES: EvolutionStage[] = [
   "queued",
   "proposing_inv",
   "proposing_dom",
+  "composing",
   "shadow_probing",
   "blind_judging",
   "regression_checking",
@@ -38,6 +41,8 @@ export function EvolutionTheaterPanel() {
   const {
     proposals,
     selectedProposalId,
+    selectProposal,
+    setActivePage,
     theaterStage,
     theaterLogs,
     theaterLiveMetrics,
@@ -51,6 +56,17 @@ export function EvolutionTheaterPanel() {
   const [mode, setMode] = useState<EvolutionMode>("parallel");
   const [k, setK] = useState(2);
   const [rationaleOpen, setRationaleOpen] = useState(true);
+  const logsContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = logsContainerRef.current;
+    if (!el) return;
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [theaterLogs.length]);
 
   const proposal =
     proposals.find((p) => p.id === selectedProposalId) ?? proposals[0] ?? null;
@@ -187,7 +203,10 @@ export function EvolutionTheaterPanel() {
         </div>
 
         {theaterLogs.length > 0 && (
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] p-3 font-mono text-[11px]">
+          <div
+            ref={logsContainerRef}
+            className="max-h-40 space-y-1 overflow-y-auto rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] p-3 font-mono text-[11px]"
+          >
             {theaterLogs.map((log) => (
               <div key={log.id} className="flex items-start gap-2">
                 <span
@@ -217,6 +236,52 @@ export function EvolutionTheaterPanel() {
           </div>
         )}
       </div>
+
+      {/* Candidate Diffs Compact Bar */}
+      {proposal && proposal.diffs.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-4 py-2.5 text-xs">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            <span className="inline-flex shrink-0 items-center gap-1.5 font-semibold text-[var(--hx-text-2)]">
+              <FileCode2 className="h-3.5 w-3.5 text-[var(--hx-accent)]" />
+              <span>{t("theater.changedOrgans")}</span>
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {proposal.diffs.map((d) => (
+                <span
+                  key={d.path}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-2 py-0.5 font-mono text-[11px] text-[var(--hx-text)]"
+                >
+                  <span
+                    className={cn(
+                      "font-semibold",
+                      d.changeType === "added"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : d.changeType === "deleted"
+                          ? "text-rose-600 dark:text-rose-400"
+                          : "text-cyan-600 dark:text-cyan-400",
+                    )}
+                  >
+                    {d.changeType === "added" ? "+" : d.changeType === "deleted" ? "-" : "~"}
+                  </span>
+                  <span>{d.path}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              selectProposal(proposal.id);
+              setActivePage("proposals");
+            }}
+            className="hx-pressable inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-3 py-1 text-[11px] font-medium text-[var(--hx-accent)] hover:opacity-90"
+          >
+            <span>{t("theater.inspectProposal")}</span>
+            <ArrowRight className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* Blind Judge A/B Arena */}
       {proposal?.blindJudge && locProposal && (

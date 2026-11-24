@@ -1,14 +1,20 @@
 import { useState } from "react";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, GitBranch, Sparkles } from "lucide-react";
 import { localizeProposal } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
+import { shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { TaskComposer } from "./TaskComposer.tsx";
 
 export function NewTaskHome() {
-  const { proposals, selectProposal, setActivePage, setRightTab } = useCommandDeckStore();
+  const { proposals, commits, systemHealth, selectProposal, setActivePage, setRightTab } =
+    useCommandDeckStore();
   const { locale, t } = useI18n();
   const [draft, setDraft] = useState("");
+
+  const activeSha = systemHealth?.activeCommitSha ?? commits[0]?.sha ?? "a7f3c91";
+  const activeCommit = commits.find((c) => c.sha === activeSha) ?? commits[0];
+  const activeVersion = activeCommit?.versionTag ?? "v7";
 
   const scenarios = [
     { label: t("home.scenario1Label"), prompt: t("home.scenario1Prompt") },
@@ -36,6 +42,22 @@ export function NewTaskHome() {
         <p className="mt-1.5 text-center text-xs text-[var(--hx-text-3)]">
           {t("home.subtitle")}
         </p>
+
+        {/* Active Genome Pulse Pill */}
+        <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-1 text-[11px] text-[var(--hx-text-2)]">
+          <GitBranch className="h-3 w-3 text-[var(--hx-accent)]" />
+          <span className="hx-num font-mono">
+            {t("home.genomePill", { version: activeVersion, sha: shortSha(activeSha) })}
+          </span>
+          <span className="opacity-30">·</span>
+          <button
+            type="button"
+            onClick={() => setActivePage("deck")}
+            className="hx-pressable font-medium text-[var(--hx-accent)] hover:underline"
+          >
+            {t("home.openDeckLink")}
+          </button>
+        </div>
 
         {/* Quick Scenario Pills */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

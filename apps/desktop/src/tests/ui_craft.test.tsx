@@ -13,8 +13,15 @@ import {
   buildSplitDiffRows,
   computeDiffStats,
 } from "../features/evolution/DiffReviewPanel.tsx";
+import { buildTrajectorySpans } from "../features/chat/TrajectoryMiniTimeline.tsx";
+import {
+  classifyOrganFilter,
+  computeTreeFileDiffs,
+  parseExperienceEntries,
+} from "../features/harness/GenomeOrganExplorer.tsx";
 import { enUSMessages, zhCNMessages } from "../i18n/index.ts";
 import { MockIpcAdapter } from "../ipc/index.ts";
+import { createInitialGenomeTree, INITIAL_COMMIT_SHAS } from "../ipc/mockData.ts";
 import { useCommandDeckStore } from "../stores/useCommandDeckStore.ts";
 
 describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n", () => {
@@ -154,5 +161,81 @@ describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n",
       const val = enUSMessages[key as keyof typeof enUSMessages];
       expect(cjkRe.test(val)).toBe(false);
     }
+  });
+
+  it("classifies genome organs, parses EXPERIENCE.md entries, and diffs parent->child commits accurately", () => {
+    const trees = createInitialGenomeTree();
+    const v6 = trees[INITIAL_COMMIT_SHAS.v6]!;
+    const v7 = trees[INITIAL_COMMIT_SHAS.v7]!;
+
+    const byPath = (path: string) => v7.find((f) => f.path === path)!;
+    expect(classifyOrganFilter(byPath("systemprompt.md"))).toBe("prompt");
+    expect(classifyOrganFilter(byPath("skills/csv_audit/SKILL.md"))).toBe("skill");
+    expect(classifyOrganFilter(byPath("hooks/example_trim_output.ts"))).toBe("hook");
+    expect(classifyOrganFilter(byPath("memory/LongTermMEMORY.md"))).toBe("memory");
+    expect(classifyOrganFilter(byPath("meta/domains/file_ops/EXPERIENCE.md"))).toBe("experience");
+    expect(classifyOrganFilter(byPath("mcp/servers.json"))).toBe("config");
+
+    const experiences = parseExperienceEntries(v7);
+    expect(experiences).toHaveLength(2);
+    expect(experiences.map((e) => e.domain).sort()).toEqual(["diagnostics", "file_ops"]);
+    const fileOpsExp = experiences.find((e) => e.domain === "file_ops")!;
+    expect(fileOpsExp.cue).toContain("Multi-file");
+    expect(fileOpsExp.lesson).toContain("Scan filenames");
+    expect(fileOpsExp.evidence).toContain("45%");
+    expect(fileOpsExp.confidence).toContain("high");
+
+    const diffs = computeTreeFileDiffs(v6, v7);
+    const diffPaths = diffs.map((d) => d.path).sort();
+    expect(diffPaths).toEqual([
+      "manifest.json",
+      "meta/domains/file_ops/EXPERIENCE.md",
+      "meta/regression_cases.jsonl",
+      "tool_descriptions/shell.md",
+    ]);
+    const shellDiff = diffs.find((d) => d.path === "tool_descriptions/shell.md")!;
+    expect(shellDiff.changeType).toBe("modified");
+    expect(shellDiff.added).toBe(1);
+    expect(shellDiff.removed).toBe(0);
+    const expDiff = diffs.find((d) => d.path === "meta/domains/file_ops/EXPERIENCE.md")!;
+    expect(expDiff.changeType).toBe("added");
+    expect(expDiff.added).toBeGreaterThan(0);
+  });
+
+  it("projects thread messages into a 3-lane trajectory timeline with error tracking", () => {
+    const { messagesByThread } = useCommandDeckStore.getState();
+    const billingMsgs = messagesByThread["thr-billing-csv"] ?? [];
+    const proj = buildTrajectorySpans(billingMsgs);
+
+    expect(proj.turnCount).toBeGreaterThanOrEqual(1);
+    expect(proj.toolCount).toBeGreaterThanOrEqual(2);
+    expect(proj.spans.some((s) => s.lane === 0 && s.kind === "reasoning")).toBe(true);
+    expect(proj.spans.some((s) => s.lane === 1 && s.kind === "message")).toBe(true);
+    expect(proj.spans.some((s) => s.lane === 2 && s.kind === "tool")).toBe(true);
+
+    // Failed/denied tool calls must increment errorCount
+    const withError = buildTrajectorySpans([
+      ...billingMsgs,
+      {
+        id: "msg-err",
+        threadId: "thr-billing-csv",
+        role: "assistant",
+        content: "Command failed",
+        toolCalls: [
+          {
+            id: "tc-err",
+            name: "shell.exec",
+            args: { command: "false" },
+            status: "failed",
+            error: "exit 1",
+            truncated: false,
+            startedAt: new Date().toISOString(),
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    expect(withError.errorCount).toBe(1);
+    expect(withError.spans.some((s) => s.id === "msg-err:tool:tc-err" && s.isError)).toBe(true);
   });
 });

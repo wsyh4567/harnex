@@ -657,8 +657,9 @@ export function createInitialGenomeTree(): Record<string, GenomeFile[]> {
     {
       path: "tool_descriptions/shell.md",
       component: "tool_descriptions",
-      content: "# Shell Tool\nUse standard UTF-8 reading for text files.",
-      sizeBytes: 54,
+      content:
+        "# Shell Tool\nUse standard UTF-8 reading for text files.\n- Batch directory scans and inspect headers before loading large file sets.",
+      sizeBytes: 129,
     },
     {
       path: "skills/csv_audit/SKILL.md",
@@ -705,11 +706,18 @@ export function createInitialGenomeTree(): Record<string, GenomeFile[]> {
       sizeBytes: 55,
     },
     {
+      path: "meta/domains/diagnostics/EXPERIENCE.md",
+      component: "meta",
+      content:
+        "## Entry #1\n- **Cue**: Investigating intermittent 502 / upstream gateway timeouts in service logs\n- **Lesson**: Correlate 502 timestamps with upstream latency spikes in a single bounded awk/rg pass before opening full log archives.\n- **Evidence**: Reduced diagnostics steps from 9 to 4 with 0 timeout retries in v6.\n- **Confidence**: high (verified across 2 shadow probes)",
+      sizeBytes: 368,
+    },
+    {
       path: "meta/domains/file_ops/EXPERIENCE.md",
       component: "meta",
       content:
-        "## Entry #1\n- **Cue**: Multi-file directory aggregation\n- **Lesson**: Scan filenames and byte headers first before loading entire files into context.\n- **Evidence**: Cut tool calls by 45% in v7.",
-      sizeBytes: 195,
+        "## Entry #1\n- **Cue**: Multi-file directory aggregation\n- **Lesson**: Scan filenames and byte headers first before loading entire files into context.\n- **Evidence**: Cut tool calls by 45% in v7.\n- **Confidence**: high (order-consistent blind judge win)",
+      sizeBytes: 256,
     },
     {
       path: "meta/regression_cases.jsonl",
@@ -720,14 +728,71 @@ export function createInitialGenomeTree(): Record<string, GenomeFile[]> {
     },
   ];
 
-  const v0Files: GenomeFile[] = v7Files.filter(
-    (f) => f.path === "manifest.json" || f.path === "systemprompt.md" || f.path === "guardrails.md",
-  );
+  const v6Files: GenomeFile[] = v7Files
+    .filter(
+      (f) =>
+        f.path !== "meta/domains/file_ops/EXPERIENCE.md" &&
+        f.path !== "meta/regression_cases.jsonl",
+    )
+    .map((f) => {
+      if (f.path === "manifest.json") {
+        const content = JSON.stringify(
+          { schemaVersion: 1, genomeVersion: "v6", healthStatus: "healthy", createdBy: "Harnex" },
+          null,
+          2,
+        );
+        return { ...f, content, sizeBytes: content.length };
+      }
+      if (f.path === "tool_descriptions/shell.md") {
+        const content = "# Shell Tool\nUse standard UTF-8 reading for text files.";
+        return { ...f, content, sizeBytes: content.length };
+      }
+      return f;
+    });
+
+  const v5Files: GenomeFile[] = v6Files
+    .filter(
+      (f) =>
+        f.path !== "memory/LongTermMEMORY.md" &&
+        f.path !== "meta/domains/diagnostics/EXPERIENCE.md",
+    )
+    .map((f) => {
+      if (f.path === "manifest.json") {
+        const content = JSON.stringify(
+          { schemaVersion: 1, genomeVersion: "v5", healthStatus: "healthy", createdBy: "Harnex" },
+          null,
+          2,
+        );
+        return { ...f, content, sizeBytes: content.length };
+      }
+      return f;
+    });
+
+  const v0Files: GenomeFile[] = v5Files
+    .filter(
+      (f) => f.path === "manifest.json" || f.path === "systemprompt.md" || f.path === "guardrails.md",
+    )
+    .map((f) => {
+      if (f.path === "manifest.json") {
+        const content = JSON.stringify(
+          { schemaVersion: 1, genomeVersion: "v0", healthStatus: "healthy", createdBy: "Harnex" },
+          null,
+          2,
+        );
+        return { ...f, content, sizeBytes: content.length };
+      }
+      if (f.path === "guardrails.md") {
+        const content =
+          "# Soft Guardrails\n- Never fabricate file paths or command outputs.\n- Prefer minimal, reversible edits.";
+        return { ...f, content, sizeBytes: content.length };
+      }
+      return f;
+    });
 
   return {
     [INITIAL_COMMIT_SHAS.v7]: v7Files,
-    [INITIAL_COMMIT_SHAS.v6]: v7Files,
-    [INITIAL_COMMIT_SHAS.v5]: v7Files,
+    [INITIAL_COMMIT_SHAS.v6]: v6Files,
+    [INITIAL_COMMIT_SHAS.v5]: v5Files,
     [INITIAL_COMMIT_SHAS.v0]: v0Files,
   };
 }

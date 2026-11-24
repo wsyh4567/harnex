@@ -132,6 +132,16 @@ export function TaskComposer({
     setHighlightIdx(0);
   }, [trigger?.kind, trigger?.query]);
 
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const minHeight = variant === "home" ? 72 : 46;
+    const nextHeight = Math.max(minHeight, Math.min(el.scrollHeight, 180));
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > 180 ? "auto" : "hidden";
+  }, [prompt, variant]);
+
   const executeOrInsertOption = (opt: CompletionOption) => {
     if (!trigger) return;
     if (opt.action) {
@@ -437,6 +447,12 @@ export function TaskComposer({
             </div>
 
             <div className="flex items-center gap-2">
+              {variant === "thread" && (
+                <span className="hidden xl:inline whitespace-nowrap text-[10px] text-[var(--hx-text-3)]">
+                  {t("chat.composerHint")}
+                </span>
+              )}
+
               <ModelSwitcherPopover
                 catalog={aggregatedCatalog}
                 providers={providers}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, Flame, Languages, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
+import { CheckCircle2, Flame, Keyboard, Languages, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
 import { ChoiceMenu } from "../../components/ui/ChoiceMenu.tsx";
 import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
 import { SUPPORTED_LOCALES, useI18n } from "../../i18n/index.ts";
@@ -117,6 +117,62 @@ export function SettingsView() {
                   menuClassName="w-48"
                 />
               </section>
+
+              {/* Keyboard Shortcuts Reference */}
+              {(() => {
+                const isMac =
+                  typeof navigator !== "undefined" &&
+                  /Mac|iPhone|iPad|iPod/i.test(navigator.platform ?? "");
+                const mod = isMac ? "⌘" : "Ctrl+";
+                const shortcuts = [
+                  { keys: [`${mod}K`], label: t("settings.shortcutPalette") },
+                  { keys: [`${mod}N`], label: t("settings.shortcutNewTask") },
+                  { keys: [`${mod}B`], label: t("settings.shortcutSidebar") },
+                  { keys: [`${mod};`], label: t("settings.shortcutSideChat") },
+                  { keys: ["j", "k"], label: t("settings.shortcutProposalsNav") },
+                  { keys: ["d"], label: t("settings.shortcutProposalsDiff") },
+                  { keys: ["Esc"], label: t("settings.shortcutEsc") },
+                ];
+
+                return (
+                  <section className="space-y-3 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-5">
+                    <div className="flex items-start gap-2.5">
+                      <Keyboard className="mt-0.5 h-4 w-4 shrink-0 text-[var(--hx-accent)]" />
+                      <div>
+                        <h3 className="text-xs font-semibold text-[var(--hx-text)]">
+                          {t("settings.shortcutsTitle")}
+                        </h3>
+                        <p className="mt-0.5 text-xs text-[var(--hx-text-3)]">
+                          {t("settings.shortcutsDesc")}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="divide-y divide-[var(--hx-border)] rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)]/50">
+                      {shortcuts.map((item) => (
+                        <div
+                          key={item.label}
+                          className="flex items-center justify-between gap-3 px-3.5 py-2 text-xs"
+                        >
+                          <span className="text-[var(--hx-text-2)]">{item.label}</span>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {item.keys.map((keyLabel, idx) => (
+                              <span key={keyLabel} className="inline-flex items-center gap-1">
+                                {idx > 0 && (
+                                  <span className="text-[10px] text-[var(--hx-text-3)]">/</span>
+                                )}
+                                <kbd className="rounded-md border border-[var(--hx-border-strong)] bg-[var(--hx-surface)] px-1.5 py-0.5 font-mono text-[10px] font-medium text-[var(--hx-text)] shadow-2xs">
+                                  {keyLabel}
+                                </kbd>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })()}
             </div>
           </div>
         )}

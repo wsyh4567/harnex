@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Archive,
   ArrowRight,
   BookOpen,
   Check,
   FileCode2,
+  FlaskConical,
   Globe,
   Scale,
   ShieldAlert,
@@ -22,6 +23,17 @@ import { cn, formatDeltaPct, formatDurationMs, formatUsd } from "../../lib/utils
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { DiffReviewPanel } from "./DiffReviewPanel.tsx";
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
 export function ProposalsView() {
   const {
     proposals,
@@ -30,6 +42,8 @@ export function ProposalsView() {
     silentArchiveCount,
     adoptProposal,
     rejectProposal,
+    setActivePage,
+    setRightTab,
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
   const isZh = locale.startsWith("zh");
@@ -47,6 +61,43 @@ export function ProposalsView() {
   const readyCount = visibleProposals.filter(
     (p) => p.status === "ready" || p.status === "needs_reprobe",
   ).length;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isEditableTarget(e.target)) return;
+
+      const lower = e.key.toLowerCase();
+      if (lower === "d") {
+        if (!selected) return;
+        e.preventDefault();
+        setDetailTab((prev) => (prev === "overview" ? "diff" : "overview"));
+        return;
+      }
+
+      if (visibleProposals.length === 0) return;
+      const currentIdx = selected
+        ? visibleProposals.findIndex((p) => p.id === selected.id)
+        : -1;
+
+      if (e.key === "ArrowDown" || lower === "j") {
+        e.preventDefault();
+        const nextIdx =
+          currentIdx < 0 ? 0 : Math.min(visibleProposals.length - 1, currentIdx + 1);
+        const next = visibleProposals[nextIdx];
+        if (next) selectProposal(next.id);
+      } else if (e.key === "ArrowUp" || lower === "k") {
+        e.preventDefault();
+        const prevIdx = currentIdx <= 0 ? 0 : currentIdx - 1;
+        const prev = visibleProposals[prevIdx];
+        if (prev) selectProposal(prev.id);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected, visibleProposals, selectProposal]);
 
   const selectedLoc = selected ? localizeProposal(selected, locale) : null;
   const trustChecked = selected ? (trustConfirmed[selected.id] ?? true) : true;
@@ -116,6 +167,10 @@ export function ProposalsView() {
               );
             })
           )}
+        </div>
+
+        <div className="border-t border-[var(--hx-border)] px-3.5 py-2 text-[10px] font-mono text-[var(--hx-text-3)]">
+          {t("proposals.kbdHint")}
         </div>
       </aside>
 
@@ -419,13 +474,27 @@ export function ProposalsView() {
                       </div>
                     )}
 
-                    <div className="border-t border-[var(--hx-border)] pt-2.5 text-[11px] text-[var(--hx-text-3)]">
-                      <span className="font-medium text-[var(--hx-text-2)]">
-                        {t("proposals.adoptImpactTitle")}:{" "}
-                      </span>
-                      {selected.requiresHumanTrust
-                        ? t("evo.adoptImpactPriv")
-                        : t("evo.adoptImpactSafe")}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--hx-border)] pt-2.5 text-[11px] text-[var(--hx-text-3)]">
+                      <div>
+                        <span className="font-medium text-[var(--hx-text-2)]">
+                          {t("proposals.adoptImpactTitle")}:{" "}
+                        </span>
+                        {selected.requiresHumanTrust
+                          ? t("evo.adoptImpactPriv")
+                          : t("evo.adoptImpactSafe")}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          selectProposal(selected.id);
+                          setRightTab("theater");
+                          setActivePage("lab");
+                        }}
+                        className="hx-pressable inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-2.5 py-1 text-[11px] font-medium text-[var(--hx-accent)] hover:border-[var(--hx-accent-border)]"
+                      >
+                        <FlaskConical className="h-3 w-3" />
+                        <span>{t("proposals.openTheater")}</span>
+                      </button>
                     </div>
                   </section>
                 </div>

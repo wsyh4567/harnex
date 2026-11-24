@@ -4,7 +4,6 @@ import {
   CheckCircle2,
   Dna,
   Download,
-  FileCode2,
   GitCommitHorizontal,
   Loader2,
   Play,
@@ -33,6 +32,7 @@ import {
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { GenerationAreaMiniChart } from "./CommandDeckCharts.tsx";
 import { GenomeEvolutionTree } from "./GenomeEvolutionTree.tsx";
+import { GenomeOrganExplorer } from "./GenomeOrganExplorer.tsx";
 
 export function GenomeDeckPanel() {
   const {
@@ -65,7 +65,6 @@ export function GenomeDeckPanel() {
   const isTauriLive = ipc.mode === "tauri";
 
   const [historyView, setHistoryView] = useState<"tree" | "list">("tree");
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [confirmRevertSha, setConfirmRevertSha] = useState<string | null>(null);
   const [replayPrompt, setReplayPrompt] = useState(
     locale.startsWith("zh")
@@ -82,8 +81,12 @@ export function GenomeDeckPanel() {
   );
   const [trustedImportPaths, setTrustedImportPaths] = useState<string[]>([]);
 
-  const activeFile =
-    genomeFiles.find((f) => f.path === selectedFilePath) ?? genomeFiles[0] ?? null;
+  const selectedIdx = commits.findIndex((c) => c.sha === selectedCommitSha);
+  const selectedCommit = (selectedIdx >= 0 ? commits[selectedIdx] : commits[0]) ?? null;
+  const effectiveIdx = selectedCommit
+    ? commits.findIndex((c) => c.sha === selectedCommit.sha)
+    : -1;
+  const parentCommit = effectiveIdx >= 0 ? (commits[effectiveIdx + 1] ?? null) : null;
 
   const allModels = Array.from(new Set(providers.flatMap((p) => p.models)));
   const effectiveV0 = v0Sha || commits[commits.length - 1]?.sha || "";
@@ -314,54 +317,20 @@ export function GenomeDeckPanel() {
         </section>
       )}
 
-      {/* Component & EXPERIENCE.md Browser */}
+      {/* Component, Commit Diff & EXPERIENCE.md Explorer */}
       <section className="space-y-2">
         <h3 className="text-xs font-semibold text-[var(--hx-text-2)]">
           {t("genome.organsTitle", {
             count: genomeFiles.length,
-            sha: shortSha(selectedCommitSha ?? ""),
+            sha: shortSha(selectedCommit?.sha ?? selectedCommitSha ?? ""),
           })}
         </h3>
-        <div className="grid grid-cols-1 overflow-hidden rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-surface)] md:grid-cols-3">
-          <div className="max-h-60 divide-y divide-[var(--hx-border)] overflow-y-auto border-b border-[var(--hx-border)] md:border-b-0 md:border-r">
-            {genomeFiles.map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                onClick={() => setSelectedFilePath(f.path)}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[11px] transition-colors",
-                  activeFile?.path === f.path
-                    ? "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
-                    : "text-[var(--hx-text-2)] hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]",
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-1.5 font-mono">
-                  <FileCode2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{f.path}</span>
-                </span>
-                <span className="shrink-0 text-[10px] text-[var(--hx-text-3)]">
-                  {localizeComponentTag(f.component, locale)}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="max-h-60 overflow-y-auto p-3.5 md:col-span-2">
-            {activeFile ? (
-              <>
-                <div className="mb-2 flex items-center justify-between font-mono text-[10px] text-[var(--hx-text-3)]">
-                  <span>{activeFile.path}</span>
-                  <span>{activeFile.sizeBytes} bytes</span>
-                </div>
-                <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[var(--hx-text)]">
-                  {activeFile.content}
-                </pre>
-              </>
-            ) : (
-              <div className="text-xs text-[var(--hx-text-3)]">{t("genome.selectFile")}</div>
-            )}
-          </div>
-        </div>
+        <GenomeOrganExplorer
+          files={genomeFiles}
+          selectedCommit={selectedCommit}
+          parentCommit={parentCommit}
+          readGenomeTree={(sha) => ipc.readGenomeTree(sha)}
+        />
       </section>
 
       {/* Replay & Compare (v0 vs vN) */}
