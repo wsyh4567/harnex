@@ -220,6 +220,8 @@ export function applyTargetedEdits(
 interface ToolOutcome {
   output: string;
   error?: string;
+  exitCode?: number;
+  durationMs?: number;
   status: "completed" | "failed" | "denied";
   sourceTags?: UntrustedSourceTag[];
   changedFile?: { path: string; content?: string };
@@ -228,8 +230,13 @@ interface ToolOutcome {
 
 function resultOf(result: ExecResult): ToolOutcome {
   const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-  return { output, error: result.ok ? undefined : result.deniedReason ?? `L0 exited with status ${result.exitCode}`,
-    status: result.ok ? "completed" : result.deniedReason ? "denied" : "failed" };
+  return {
+    output,
+    error: result.ok ? undefined : result.deniedReason ?? `L0 exited with status ${result.exitCode}`,
+    exitCode: result.exitCode,
+    durationMs: result.durationMs,
+    status: result.ok ? "completed" : result.deniedReason ? "denied" : "failed",
+  };
 }
 
 const required = z.string().min(1);

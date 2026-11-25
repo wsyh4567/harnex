@@ -32,7 +32,15 @@ export function toolArguments(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export async function* finalChunks(calls: Iterable<LlmToolCall>, usage: TokenUsage): AsyncIterable<LlmStreamChunk> {
+export async function* finalChunks(
+  calls: Iterable<LlmToolCall>,
+  usage: TokenUsage,
+  finishReason?: LlmStreamChunk["finishReason"],
+): AsyncIterable<LlmStreamChunk> {
   for (const toolCall of calls) yield { type: "tool_call", toolCall };
-  yield { type: "done", usage };
+  if (finishReason && finishReason !== "stop" && finishReason !== "tool_calls") {
+    yield { type: "done", usage, finishReason };
+  } else {
+    yield { type: "done", usage };
+  }
 }

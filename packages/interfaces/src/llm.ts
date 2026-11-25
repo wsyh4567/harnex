@@ -37,6 +37,8 @@ export interface LlmStreamChunk {
   delta?: string;
   toolCall?: LlmToolCall;
   usage?: TokenUsage;
+  finishReason?: LlmResponse["finishReason"];
+  modelId?: string;
 }
 
 export interface LlmResponse {
@@ -98,6 +100,13 @@ export class MockLlmClient implements LlmClient {
     for (const tc of res.toolCalls) {
       yield { type: "tool_call", toolCall: tc };
     }
-    yield { type: "done", usage: res.usage };
+    yield {
+      type: "done",
+      usage: res.usage,
+      modelId: res.modelId,
+      ...(res.finishReason !== "stop" && res.finishReason !== "tool_calls"
+        ? { finishReason: res.finishReason }
+        : {}),
+    };
   }
 }

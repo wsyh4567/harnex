@@ -93,11 +93,17 @@ export interface SideChatTurn {
   createdAt: string;
 }
 
+export type ActivityTimelineItem =
+  | { id: string; kind: "reasoning"; text: string }
+  | { id: string; kind: "tool"; toolCall: ToolCallRecord };
+
 export interface StreamingBuffer {
   runId: string;
+  startedAt: number;
   content: string;
   reasoning: string;
   toolCalls: ToolCallRecord[];
+  timeline: ActivityTimelineItem[];
 }
 
 export interface InlineCommentDraft {
@@ -1647,7 +1653,14 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
           ),
           streamingByThread: {
             ...s.streamingByThread,
-            [event.threadId]: { runId: event.runId, content: "", reasoning: "", toolCalls: [] },
+            [event.threadId]: {
+              runId: event.runId,
+              startedAt: Date.now(),
+              content: "",
+              reasoning: "",
+              toolCalls: [],
+              timeline: [],
+            },
           },
         }));
         break;
@@ -1656,16 +1669,40 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         set((s) => {
           const prev = s.streamingByThread[event.threadId] ?? {
             runId: event.runId,
+            startedAt: Date.now(),
             content: "",
             reasoning: "",
             toolCalls: [],
+            timeline: [],
           };
-          const updated: StreamingBuffer =
-            event.channel === "reasoning"
-              ? { ...prev, reasoning: prev.reasoning + event.delta }
-              : { ...prev, content: prev.content + event.delta };
+          if (event.channel === "reasoning") {
+            const timeline = [...prev.timeline];
+            const last = timeline[timeline.length - 1];
+            if (last && last.kind === "reasoning") {
+              timeline[timeline.length - 1] = { ...last, text: last.text + event.delta };
+            } else {
+              timeline.push({
+                id: `reason-${timeline.length + 1}`,
+                kind: "reasoning",
+                text: event.delta,
+              });
+            }
+            return {
+              streamingByThread: {
+                ...s.streamingByThread,
+                [event.threadId]: {
+                  ...prev,
+                  reasoning: prev.reasoning + event.delta,
+                  timeline,
+                },
+              },
+            };
+          }
           return {
-            streamingByThread: { ...s.streamingByThread, [event.threadId]: updated },
+            streamingByThread: {
+              ...s.streamingByThread,
+              [event.threadId]: { ...prev, content: prev.content + event.delta },
+            },
           };
         });
         break;
@@ -1674,16 +1711,36 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         set((s) => {
           const prev = s.streamingByThread[event.threadId] ?? {
             runId: event.runId,
+            startedAt: Date.now(),
             content: "",
             reasoning: "",
             toolCalls: [],
+            timeline: [],
           };
+          const timeline = [...prev.timeline];
+          const existingIdx = timeline.findIndex(
+            (item) => item.kind === "tool" && item.toolCall.id === event.toolCall.id,
+          );
+          if (existingIdx >= 0) {
+            timeline[existingIdx] = {
+              id: event.toolCall.id,
+              kind: "tool",
+              toolCall: event.toolCall,
+            };
+          } else {
+            timeline.push({
+              id: event.toolCall.id,
+              kind: "tool",
+              toolCall: event.toolCall,
+            });
+          }
           return {
             streamingByThread: {
               ...s.streamingByThread,
               [event.threadId]: {
                 ...prev,
                 toolCalls: upsertToolCall(prev.toolCalls, event.toolCall),
+                timeline,
               },
             },
           };
@@ -1694,22 +1751,29 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         set((s) => {
           const prev = s.streamingByThread[event.threadId];
           if (!prev) return s;
+          const patchTool = (tc: ToolCallRecord): ToolCallRecord =>
+            tc.id === event.toolCallId
+              ? {
+                  ...tc,
+                  status: event.error ? "failed" : "completed",
+                  output: event.output,
+                  error: event.error,
+                  exitCode: event.exitCode ?? tc.exitCode,
+                  durationMs: event.durationMs ?? tc.durationMs,
+                  truncated: event.truncated,
+                  finishedAt: new Date().toISOString(),
+                }
+              : tc;
           return {
             streamingByThread: {
               ...s.streamingByThread,
               [event.threadId]: {
                 ...prev,
-                toolCalls: prev.toolCalls.map((tc) =>
-                  tc.id === event.toolCallId
-                    ? {
-                        ...tc,
-                        status: event.error ? "failed" : "completed",
-                        output: event.output,
-                        error: event.error,
-                        truncated: event.truncated,
-                        finishedAt: new Date().toISOString(),
-                      }
-                    : tc,
+                toolCalls: prev.toolCalls.map(patchTool),
+                timeline: prev.timeline.map((item) =>
+                  item.kind === "tool" && item.toolCall.id === event.toolCallId
+                    ? { ...item, toolCall: patchTool(item.toolCall) }
+                    : item,
                 ),
               },
             },

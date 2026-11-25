@@ -88,6 +88,21 @@ jobs:
             --config src-tauri/tauri.release.conf.json \
             --bundles "${{ matrix.bundles }}"
 
+      - name: Build Ratatui TUI release binary & standalone bundle
+        shell: bash
+        run: |
+          cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml --release --features tui --bin harnex-tui
+          STAGE="tui-stage/harnex-tui-${{ matrix.platform }}"
+          mkdir -p "$STAGE" release-assets
+          cp "apps/desktop/src-tauri/target/release/harnex-tui${{ matrix.ext }}" "$STAGE/"
+          cp "apps/desktop/src-tauri/binaries/harnex-sidecar-${{ matrix.target }}${{ matrix.ext }}" "$STAGE/harnex-sidecar${{ matrix.ext }}"
+          cp -r harness-seed "$STAGE/harness-seed"
+          if [[ "${{ matrix.platform }}" == windows-* ]]; then
+            powershell -NoProfile -Command "Compress-Archive -Path '$STAGE/*' -DestinationPath 'release-assets/harnex-tui-${{ matrix.platform }}.zip' -Force"
+          else
+            tar -czf "release-assets/harnex-tui-${{ matrix.platform }}.tar.gz" -C tui-stage "harnex-tui-${{ matrix.platform }}"
+          fi
+
       - name: Collect installers for upload
         shell: bash
         run: |
@@ -146,16 +161,26 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           cat > release-notes.md <<'EOF'
-          ## Harnex Desktop Release
+          ## Harnex Desktop & TUI Release
 
-          Self-evolving AI agent desktop workspace powered by **Harness²**, **Rust L0 OS Sandbox**, and an embedded **Bun Sidecar**.
+          Self-evolving AI agent workspace powered by **Harness²**, **Rust L0 OS Sandbox**, and an embedded **Bun Sidecar** — available as both a **Desktop GUI** and a **Ratatui Terminal (TUI)** client sharing `~/.harnex/`.
 
-          ### Installers
+          ### Desktop Installers
           - **Windows (x64)**: `.exe` (NSIS) / `.msi`
           - **macOS (Apple Silicon arm64)**: `.dmg`
           - **Linux (x64)**: `.AppImage` / `.deb`
 
-          All installers include the standalone `harnex-sidecar` binary and factory `harness-seed` — no separate Node.js or Bun installation required.
+          ### Terminal TUI Bundles (`harnex-tui`)
+          - **Windows (x64)**: `harnex-tui-windows-x64.zip`
+          - **macOS (Apple Silicon arm64)**: `harnex-tui-macos-arm64.tar.gz`
+          - **Linux (x64)**: `harnex-tui-linux-x64.tar.gz`
+
+          ### Highlights
+          - Real-time LLM token & reasoning summary streaming across OpenAI-compatible, Anthropic, and Gemini thinking models.
+          - Compact collapsible Turn Activity Timeline with interleaved reasoning traces, single-line tool previews, exit codes, and expandable execution logs.
+          - New Ratatui-based `harnex-tui` sharing the exact same Rust L0 sandbox, Keyring, Git genome, SQLite trace store, and interactive L0 approval guard.
+
+          All bundles include the standalone `harnex-sidecar` binary and factory `harness-seed` — no separate Node.js or Bun installation required.
           Verify integrity using `SHA256SUMS.txt`.
           EOF
 

@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ToolCallRecord } from "@harnex/protocol";
 import {
   ArrowDown,
   Check,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Circle,
   Copy,
   FlaskConical,
@@ -21,7 +18,6 @@ import { filterThreadChatApprovals } from "../../hooks/globalHookSelectors.ts";
 import {
   localizeDomainLabel,
   localizeGoalTitle,
-  localizeMessage,
   localizeThreadStatus,
   localizeThreadTitle,
 } from "../../i18n/demoContent.ts";
@@ -32,196 +28,7 @@ import { ApprovalCard } from "../security/ApprovalCard.tsx";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { TaskComposer } from "./TaskComposer.tsx";
 import { TrajectoryMiniTimeline } from "./TrajectoryMiniTimeline.tsx";
-
-function formatToolArgs(args: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(args ?? {}, null, 2);
-  } catch {
-    return String(args);
-  }
-}
-
-function ToolCallItem({
-  tc,
-  localizedOutput,
-}: {
-  tc: ToolCallRecord;
-  localizedOutput?: string;
-}) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(
-    tc.status === "awaiting_approval" || tc.status === "failed",
-  );
-  const [copiedArgs, setCopiedArgs] = useState(false);
-  const copyTimerRef = useRef<number | null>(null);
-
-  const prettyArgs = useMemo(() => formatToolArgs(tc.args), [tc.args]);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleCopyArgs = async () => {
-    try {
-      await navigator.clipboard?.writeText(prettyArgs);
-      setCopiedArgs(true);
-      if (copyTimerRef.current !== null) {
-        window.clearTimeout(copyTimerRef.current);
-      }
-      copyTimerRef.current = window.setTimeout(() => setCopiedArgs(false), 1600);
-    } catch {
-      // Ignore clipboard permission errors in restricted contexts
-    }
-  };
-
-  const statusLabelMap: Record<ToolCallRecord["status"], string> = {
-    completed: t("chat.toolCompleted"),
-    pending: t("chat.toolPending"),
-    running: t("chat.toolRunning"),
-    awaiting_approval: t("chat.toolAwaiting"),
-    failed: t("chat.toolFailed"),
-    denied: t("chat.toolDenied"),
-  };
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] text-xs">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-[var(--hx-subtle)] transition-colors"
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <Wrench className="h-3.5 w-3.5 shrink-0 text-[var(--hx-accent)]" />
-          <code className="truncate font-mono text-[11px] text-[var(--hx-text)]">{tc.name}</code>
-          <span
-            className={cn(
-              "rounded-md px-1.5 py-0.5 text-[10px] font-medium",
-              tc.status === "completed"
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                : tc.status === "awaiting_approval"
-                  ? "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"
-                  : tc.status === "failed" || tc.status === "denied"
-                    ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-                    : "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]",
-            )}
-          >
-            {statusLabelMap[tc.status]}
-          </span>
-        </div>
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 text-[var(--hx-text-3)]" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-[var(--hx-text-3)]" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="space-y-1.5 border-t border-[var(--hx-border)] px-3 py-2 font-mono text-[11px]">
-          <div className="rounded-lg bg-[var(--hx-subtle)] p-2">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-medium text-[var(--hx-text-3)]">
-                {t("chat.toolArgs")}
-              </span>
-              <button
-                type="button"
-                title={t("chat.copyToolArgs")}
-                aria-label={t("chat.copyToolArgs")}
-                onClick={() => void handleCopyArgs()}
-                className="hx-pressable inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--hx-text-3)] hover:bg-[var(--hx-surface)] hover:text-[var(--hx-text)]"
-              >
-                {copiedArgs ? (
-                  <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all text-[var(--hx-text-2)]">
-              {prettyArgs}
-            </pre>
-          </div>
-          {(localizedOutput || tc.output) && (
-            <div className="whitespace-pre-wrap rounded-lg bg-[var(--hx-subtle)] p-2 text-[var(--hx-text)]">
-              {localizedOutput ?? tc.output}
-              {tc.truncated && (
-                <span className="ml-2 text-amber-600 dark:text-amber-400">
-                  {t("chat.truncated")}
-                </span>
-              )}
-            </div>
-          )}
-          {tc.error && (
-            <div className="whitespace-pre-wrap rounded-lg bg-rose-50 p-2 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-              {tc.error}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ToolCallGroup({
-  toolCalls,
-  toolOutputs,
-}: {
-  toolCalls: ToolCallRecord[];
-  toolOutputs: Record<string, string>;
-}) {
-  const { t } = useI18n();
-  const allCompleted = toolCalls.every((tc) => tc.status === "completed");
-  const shouldFoldByDefault = toolCalls.length > 3 && allCompleted;
-  const [groupExpanded, setGroupExpanded] = useState(false);
-
-  if (!shouldFoldByDefault) {
-    return (
-      <div className="space-y-1.5">
-        {toolCalls.map((tc) => (
-          <ToolCallItem key={tc.id} tc={tc} localizedOutput={toolOutputs[tc.id]} />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <button
-        type="button"
-        onClick={() => setGroupExpanded((v) => !v)}
-        className="hx-pressable flex w-full items-center justify-between gap-2 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-3 py-2 text-left text-xs hover:border-[var(--hx-border-strong)] hover:bg-[var(--hx-subtle)]"
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          <span className="truncate font-medium text-[var(--hx-text)]">
-            {t("chat.toolGroupCompleted", { count: toolCalls.length })}
-          </span>
-        </div>
-        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-[var(--hx-text-3)]">
-          <span>
-            {groupExpanded ? t("chat.toolGroupCollapse") : t("chat.toolGroupExpand")}
-          </span>
-          {groupExpanded ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </span>
-      </button>
-
-      {groupExpanded && (
-        <div className="space-y-1.5 pl-2 border-l border-[var(--hx-border)]">
-          {toolCalls.map((tc) => (
-            <ToolCallItem key={tc.id} tc={tc} localizedOutput={toolOutputs[tc.id]} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+import { buildTurnDisplaySegments, TurnActivityFeed } from "./TurnActivityFeed.tsx";
 
 export function ThreadWorkspace() {
   const {
@@ -239,7 +46,6 @@ export function ThreadWorkspace() {
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
 
-  const [openReasoningIds, setOpenReasoningIds] = useState<Record<string, boolean>>({});
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -252,6 +58,10 @@ export function ThreadWorkspace() {
   const messages = activeThread ? (messagesByThread[activeThread.id] ?? []) : [];
   const streaming = activeThread ? streamingByThread[activeThread.id] : undefined;
   const threadApprovals = filterThreadChatApprovals(pendingApprovals, activeThread?.id);
+  const displaySegments = useMemo(
+    () => buildTurnDisplaySegments(messages, locale),
+    [messages, locale],
+  );
 
   const updateScrollBottomState = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -443,117 +253,93 @@ export function ThreadWorkspace() {
                 </div>
               )}
 
-              {messages.map((msg) => {
-                const reasoningOpen = openReasoningIds[msg.id] ?? false;
-                const loc = localizeMessage(msg, locale);
-
-                if (msg.role === "user") {
+              {displaySegments.map((seg) => {
+                if (seg.kind === "user") {
                   return (
-                    <div key={msg.id} data-message-id={msg.id} className="flex justify-end">
+                    <div key={seg.message.id} data-message-id={seg.message.id} className="flex justify-end">
                       <div className="max-w-[82%] rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--hx-text)]">
-                        {loc.content}
+                        {seg.content}
                       </div>
                     </div>
                   );
                 }
 
-                if (msg.role === "steer") {
+                if (seg.kind === "steer") {
                   return (
                     <div
-                      key={msg.id}
-                      data-message-id={msg.id}
+                      key={seg.message.id}
+                      data-message-id={seg.message.id}
                       className="space-y-1 rounded-2xl border border-violet-500/30 bg-violet-50/70 px-4 py-3 text-xs dark:bg-violet-950/25"
                     >
                       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
                         <Sparkles className="h-3.5 w-3.5" />
                         <span>{t("chat.humanSteerInjected")}</span>
                       </div>
-                      <p className="text-[13px] text-[var(--hx-text)]">{loc.content}</p>
+                      <p className="text-[13px] text-[var(--hx-text)]">{seg.content}</p>
                     </div>
                   );
                 }
 
                 return (
                   <div
-                    key={msg.id}
-                    data-message-id={msg.id}
+                    key={seg.id}
+                    data-message-id={seg.id}
                     className="group/msg space-y-2.5 py-1 text-[13px]"
                   >
-                    {loc.reasoning && (
-                      <div>
+                    {seg.messageIds.slice(1).map((extraId) => (
+                      <span key={extraId} data-message-id={extraId} className="sr-only" />
+                    ))}
+
+                    {seg.activities.length > 0 && (
+                      <TurnActivityFeed
+                        activities={seg.activities}
+                        toolOutputs={seg.toolOutputs}
+                        elapsedMs={seg.elapsedMs}
+                      />
+                    )}
+
+                    {seg.finalContent && <MarkdownProse content={seg.finalContent} />}
+
+                    {seg.finalContent && (
+                      <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
                         <button
                           type="button"
-                          onClick={() =>
-                            setOpenReasoningIds((prev) => ({ ...prev, [msg.id]: !reasoningOpen }))
-                          }
-                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]"
+                          onClick={() => void handleCopyResponse(seg.id, seg.finalContent)}
+                          className="hx-pressable inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-1 text-[11px] text-[var(--hx-text-2)] hover:border-[var(--hx-border-strong)] hover:text-[var(--hx-text)]"
                         >
-                          {reasoningOpen ? (
-                            <ChevronDown className="h-3 w-3" />
+                          {copiedMsgId === seg.id ? (
+                            <>
+                              <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>{t("chat.copiedResponse")}</span>
+                            </>
                           ) : (
-                            <ChevronRight className="h-3 w-3" />
+                            <>
+                              <Copy className="h-3 w-3" />
+                              <span>{t("chat.copyResponse")}</span>
+                            </>
                           )}
-                          <span>{t("chat.reasoningTrace")}</span>
                         </button>
-                        {reasoningOpen && (
-                          <pre className="mt-1.5 whitespace-pre-wrap rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] p-3 font-mono text-[11px] leading-relaxed text-[var(--hx-text-2)]">
-                            {loc.reasoning}
-                          </pre>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => toggleSideChat(true)}
+                          className="hx-pressable inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-1 text-[11px] text-[var(--hx-text-2)] hover:border-[var(--hx-border-strong)] hover:text-[var(--hx-text)]"
+                        >
+                          <MessageSquarePlus className="h-3 w-3 text-violet-600 dark:text-violet-400" />
+                          <span>{t("chat.askBtwAbout")}</span>
+                        </button>
                       </div>
                     )}
-
-                    {msg.toolCalls && msg.toolCalls.length > 0 && (
-                      <ToolCallGroup toolCalls={msg.toolCalls} toolOutputs={loc.toolOutputs} />
-                    )}
-
-                    <MarkdownProse content={loc.content} />
-
-                    <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => void handleCopyResponse(msg.id, loc.content)}
-                        className="hx-pressable inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-1 text-[11px] text-[var(--hx-text-2)] hover:border-[var(--hx-border-strong)] hover:text-[var(--hx-text)]"
-                      >
-                        {copiedMsgId === msg.id ? (
-                          <>
-                            <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                            <span>{t("chat.copiedResponse")}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="h-3 w-3" />
-                            <span>{t("chat.copyResponse")}</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleSideChat(true)}
-                        className="hx-pressable inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-1 text-[11px] text-[var(--hx-text-2)] hover:border-[var(--hx-border-strong)] hover:text-[var(--hx-text)]"
-                      >
-                        <MessageSquarePlus className="h-3 w-3 text-violet-600 dark:text-violet-400" />
-                        <span>{t("chat.askBtwAbout")}</span>
-                      </button>
-                    </div>
                   </div>
                 );
               })}
 
               {streaming && (
-                <div className="space-y-2.5 rounded-2xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] p-4 text-xs">
-                  <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--hx-accent)]">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span className="hx-shimmer">{t("chat.streaming", { runId: streaming.runId })}</span>
-                  </div>
-                  {streaming.reasoning && (
-                    <pre className="whitespace-pre-wrap rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 font-mono text-[11px] text-[var(--hx-text-2)]">
-                      {streaming.reasoning}
-                    </pre>
-                  )}
-                  {streaming.toolCalls.map((tc) => (
-                    <ToolCallItem key={tc.id} tc={tc} />
-                  ))}
+                <div className="space-y-3 py-1 text-[13px]">
+                  <TurnActivityFeed
+                    activities={streaming.timeline}
+                    isStreaming
+                    startedAt={streaming.startedAt}
+                  />
                   {streaming.content && <MarkdownProse content={streaming.content} />}
                 </div>
               )}

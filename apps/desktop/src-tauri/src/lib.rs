@@ -6,11 +6,14 @@ pub mod hooks;
 pub mod keyring;
 mod pricing_catalog;
 pub mod protocol;
+pub mod runtime;
 pub mod sandbox_os;
 pub mod security;
 pub mod sidecar;
 #[cfg(feature = "tauri-runtime")]
 pub mod tray;
+#[cfg(feature = "tui")]
+pub mod tui;
 pub mod updater;
 
 use std::{fs, io, path::Path};

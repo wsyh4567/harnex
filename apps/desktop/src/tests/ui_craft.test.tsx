@@ -15,6 +15,11 @@ import {
 } from "../features/evolution/DiffReviewPanel.tsx";
 import { buildTrajectorySpans } from "../features/chat/TrajectoryMiniTimeline.tsx";
 import {
+  buildTurnDisplaySegments,
+  summarizeToolTarget,
+  TurnActivityFeed,
+} from "../features/chat/TurnActivityFeed.tsx";
+import {
   classifyOrganFilter,
   computeTreeFileDiffs,
   parseExperienceEntries,
@@ -273,5 +278,89 @@ describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n",
     expect(useCommandDeckStore.getState().pendingLabGoal).toBe(report!.suggestedPruningGoal!);
     useCommandDeckStore.getState().consumePendingLabGoal();
     expect(useCommandDeckStore.getState().pendingLabGoal).toBeNull();
+  });
+
+  it("groups multi-step assistant turns into an interleaved activity feed, drops raw tool bubbles, and renders exit codes", () => {
+    const t0 = "2026-11-25T00:00:00.000Z";
+    const t1 = "2026-11-25T00:00:12.000Z";
+    const t2 = "2026-11-25T00:01:05.000Z";
+    const segments = buildTurnDisplaySegments(
+      [
+        { id: "u1", threadId: "t1", role: "user", content: "Inspect price ratios", createdAt: t0 },
+        {
+          id: "a1",
+          threadId: "t1",
+          role: "assistant",
+          content: "",
+          reasoning: "Checking `9.49` vs `10.25` ratio first.",
+          toolCalls: [
+            {
+              id: "tc-sh",
+              name: "shell",
+              args: { command: "bun", args: ["test"] },
+              status: "completed",
+              output: "all pass",
+              exitCode: 0,
+              durationMs: 420,
+              truncated: false,
+              startedAt: t0,
+              finishedAt: t1,
+            },
+            {
+              id: "tc-rd",
+              name: "read_file",
+              args: { path: "src/app.ts", offset: 1, limit: 120 },
+              status: "completed",
+              output: "1: export const ok = true;",
+              truncated: false,
+              startedAt: t1,
+              finishedAt: t1,
+            },
+          ],
+          createdAt: t0,
+        },
+        { id: "tool-raw", threadId: "t1", role: "tool", content: "all pass", createdAt: t1 },
+        {
+          id: "a2",
+          threadId: "t1",
+          role: "assistant",
+          content: "Final conclusion ready.",
+          reasoning: "Confirmed everything passes.",
+          createdAt: t2,
+        },
+      ],
+      "zh-CN",
+    );
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]?.kind).toBe("user");
+    expect(segments[1]?.kind).toBe("assistant_turn");
+    if (segments[1]?.kind !== "assistant_turn") throw new Error("expected assistant_turn");
+    expect(segments[1].activities.map((a) => a.kind)).toEqual([
+      "reasoning",
+      "tool",
+      "tool",
+      "reasoning",
+    ]);
+    expect(segments[1].finalContent).toBe("Final conclusion ready.");
+    expect(segments[1].elapsedMs).toBe(65_000);
+    expect(
+      summarizeToolTarget({
+        id: "tc-rd",
+        name: "read_file",
+        args: { path: "src/app.ts", offset: 1, limit: 120 },
+        status: "completed",
+        truncated: false,
+        startedAt: t1,
+      }),
+    ).toBe("src/app.ts (L1-120)");
+
+    const html = renderToStaticMarkup(
+      <TurnActivityFeed activities={segments[1].activities} isStreaming startedAt={Date.now() - 5000} />,
+    );
+    expect(html).toContain("turn-activity-feed");
+    expect(html).toContain("bun test");
+    expect(html).toContain("src/app.ts (L1-120)");
+    expect(html).toContain("0");
   });
 });

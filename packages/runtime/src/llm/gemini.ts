@@ -41,10 +41,13 @@ export class GeminiLlmClient implements LlmClient {
       if (last?.role === role) last.parts?.push(...parts);
       else contents.push({ role, parts });
     }
-    return { model: request.modelId ?? this.model, contents, config: {
+    const targetModel = request.modelId ?? this.model;
+    const includeThoughts = /(?:gemini-(?:2\.5|3)|thinking)/i.test(targetModel);
+    return { model: targetModel, contents, config: {
       // Implicit caching uses the unchanged message prefix; Gemini has no ephemeral block parameter.
       systemInstruction: system.join("\n\n") || undefined, abortSignal: request.signal,
       temperature: request.temperature, maxOutputTokens: request.maxTokens,
+      ...(includeThoughts ? { thinkingConfig: { includeThoughts: true } } : {}),
       tools: request.tools?.length ? [{ functionDeclarations: request.tools.map((tool) => ({
         name: tool.name, description: tool.description,
         parameters: geminiSchema(tool.inputSchema),
@@ -78,15 +81,19 @@ export class GeminiLlmClient implements LlmClient {
   async *stream(request: LlmRequest): AsyncIterable<LlmStreamChunk> {
     const stream = await this.sdk.models.generateContentStream(this.params(request));
     let usage = zeroUsage();
+    let finishReason: LlmResponse["finishReason"] | undefined;
     const calls: LlmToolCall[] = [];
     for await (const response of stream) {
       if (response.usageMetadata) usage = this.usage(response);
-      for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+      const candidate = response.candidates?.[0];
+      if (candidate?.finishReason === "MAX_TOKENS") finishReason = "length";
+      else if (candidate?.finishReason && candidate.finishReason !== "STOP") finishReason = "error";
+      for (const part of candidate?.content?.parts ?? []) {
         if (part.text) yield { type: part.thought ? "reasoning_delta" : "text_delta", delta: part.text };
         calls.push(...callFromPart(part));
       }
     }
-    yield* finalChunks(calls, usage);
+    yield* finalChunks(calls, usage, finishReason);
   }
 }
 

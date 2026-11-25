@@ -29,6 +29,8 @@ export const ToolCallRecordSchema = z.object({
   status: ToolCallStatusSchema,
   output: z.string().optional(),
   error: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
   truncated: z.boolean().default(false),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
@@ -159,6 +161,8 @@ export const RunnerEventSchema = z.discriminatedUnion("type", [
     toolCallId: z.string(),
     output: z.string(),
     error: z.string().optional(),
+    exitCode: z.number().int().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
     truncated: z.boolean().default(false),
   }),
   z.object({

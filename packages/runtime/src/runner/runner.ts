@@ -129,10 +129,65 @@ export class ForegroundTaskRunner implements TaskRunner {
     }
   }
 
-  private async complete(state: ActiveRun, request: Omit<LlmRequest, "slot" | "signal" | "modelId">, revision: number) {
+  private async complete(
+    state: ActiveRun,
+    request: Omit<LlmRequest, "slot" | "signal" | "modelId">,
+    revision: number,
+    streamTarget?: { threadId: string; runId: string },
+  ) {
     const routed: RoutedLlmRequest = { ...request, slot: "solver", modelId: state.modelId, providerIdOverride: state.providerId,
       signal: state.controller.signal };
-    const response = await this.budgeted(state, () => state.steers.length === revision ? this.llm.complete(routed) : undefined);
+    const response = await this.budgeted(state, async () => {
+      if (state.steers.length !== revision) return undefined;
+      if (!streamTarget || state.dryRun || typeof this.llm.stream !== "function") {
+        return this.llm.complete(routed);
+      }
+      let content = "";
+      let reasoning = "";
+      const toolCalls: NonNullable<LlmMessage["toolCalls"]> = [];
+      let usage = zeroUsage();
+      let finishReason: "stop" | "tool_calls" | "length" | "aborted" | "error" | undefined;
+      let modelId = state.modelId ?? "unknown";
+      for await (const chunk of this.llm.stream(routed)) {
+        if (chunk.type === "reasoning_delta" && chunk.delta) {
+          reasoning += chunk.delta;
+          if (!state.paused && state.steers.length === revision) {
+            this.bridge.emitEvent({
+              type: "runner.token",
+              threadId: streamTarget.threadId,
+              runId: streamTarget.runId,
+              delta: chunk.delta,
+              channel: "reasoning",
+            });
+          }
+        } else if (chunk.type === "text_delta" && chunk.delta) {
+          content += chunk.delta;
+          if (!state.paused && state.steers.length === revision) {
+            this.bridge.emitEvent({
+              type: "runner.token",
+              threadId: streamTarget.threadId,
+              runId: streamTarget.runId,
+              delta: chunk.delta,
+              channel: "content",
+            });
+          }
+        } else if (chunk.type === "tool_call" && chunk.toolCall) {
+          toolCalls.push(chunk.toolCall);
+        } else if (chunk.type === "done") {
+          if (chunk.usage) usage = chunk.usage;
+          if (chunk.finishReason) finishReason = chunk.finishReason;
+          if (chunk.modelId) modelId = chunk.modelId;
+        }
+      }
+      return {
+        content,
+        reasoning: reasoning || undefined,
+        toolCalls,
+        usage,
+        modelId,
+        finishReason: finishReason ?? (toolCalls.length ? "tool_calls" : "stop"),
+      };
+    });
     if (!response) return;
     for (const key of ["inputTokens", "outputTokens", "cachedInputTokens", "reasoningTokens", "costUsd"] as const) {
       state.usage[key] += response.usage[key];
@@ -283,10 +338,13 @@ export class ForegroundTaskRunner implements TaskRunner {
         await this.setThread(state, { contextUsedTokens: used });
         emit({ type: "runner.context_usage", threadId, usedTokens: used, maxTokens: this.contextMax, compressed });
         metrics.steps++;
-        const response = await this.complete(state, { ...contextRequest, messages: [...state.messages] }, revision);
+        const streamTarget = state.dryRun ? undefined : { threadId, runId };
+        const response = await this.complete(state, { ...contextRequest, messages: [...state.messages] }, revision, streamTarget);
         if (!response) continue;
-        if (response.reasoning) emit({ type: "runner.token", threadId, runId, delta: response.reasoning, channel: "reasoning" });
-        if (response.content) emit({ type: "runner.token", threadId, runId, delta: response.content, channel: "content" });
+        if (!streamTarget) {
+          if (response.reasoning) emit({ type: "runner.token", threadId, runId, delta: response.reasoning, channel: "reasoning" });
+          if (response.content) emit({ type: "runner.token", threadId, runId, delta: response.content, channel: "content" });
+        }
         if (["error", "aborted", "length"].includes(response.finishReason)) {
           finalOutput = response.content;
           await this.remember(state, threadId, "assistant", finalOutput, { reasoning: response.reasoning });
@@ -308,7 +366,8 @@ export class ForegroundTaskRunner implements TaskRunner {
           for (let index = 0; index < response.toolCalls.length; index++) {
             const call = response.toolCalls[index]!, record = records[index]!;
             await this.checkpoint(state);
-            emit({ type: "runner.tool_call", threadId, runId, toolCall: { ...record } });
+            const toolStart = Date.now();
+            emit({ type: "runner.tool_call", threadId, runId, toolCall: { ...record, status: "running" } });
             const allowed = tools.some((tool) => tool.name === call.name);
             let outcome: Awaited<ReturnType<typeof runTool>>;
             let entered = false;
@@ -339,11 +398,28 @@ export class ForegroundTaskRunner implements TaskRunner {
             const post = entered ? await dispatchHooks("PostToolUse", { toolName: call.name, status: outcome.status }, revision, truncated) : undefined;
             if (post && post !== "Skipped after human steering") { metrics.errors++; trajectory.push(`[HOOK ERROR] ${post}`); }
             if (outcome.error && outcome.error !== "Skipped after human steering") metrics.errors++;
-            Object.assign(record, truncated, { status: outcome.status, error: outcome.error, finishedAt: now() });
+            const durationMs = outcome.durationMs ?? Math.max(0, Date.now() - toolStart);
+            const exitCode = outcome.exitCode;
+            Object.assign(record, truncated, {
+              status: outcome.status,
+              error: outcome.error,
+              ...(exitCode !== undefined ? { exitCode } : {}),
+              durationMs,
+              finishedAt: now(),
+            });
             state.messages.push({ role: "tool", toolCallId: call.id, content: truncated.output });
             observations.push(truncated.output);
             trajectory.push(`[ACTION] ${call.name}\n[OBSERVATION] ${truncated.output}`);
-            emit({ type: "runner.tool_result", threadId, runId, toolCallId: call.id, ...truncated, error: outcome.error });
+            emit({
+              type: "runner.tool_result",
+              threadId,
+              runId,
+              toolCallId: call.id,
+              ...truncated,
+              error: outcome.error,
+              ...(exitCode !== undefined ? { exitCode } : {}),
+              durationMs,
+            });
           }
         } finally {
           await this.remember(state, threadId, "assistant", response.content, { reasoning: response.reasoning, toolCalls: records });

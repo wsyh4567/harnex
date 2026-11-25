@@ -82,6 +82,6 @@ export class AnthropicLlmClient implements LlmClient {
       if (event.delta.type === "thinking_delta") yield { type: "reasoning_delta", delta: event.delta.thinking };
     }
     const result = this.result(await stream.finalMessage());
-    yield* finalChunks(result.toolCalls, result.usage);
+    yield* finalChunks(result.toolCalls, result.usage, result.finishReason);
   }
 }

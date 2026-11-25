@@ -296,13 +296,28 @@ export class ProviderRegistry {
         }, signal);
       },
       async *stream(request): AsyncIterable<LlmStreamChunk> {
+        const { signal } = request;
+        let gatewayRetries = 0;
         const { iterator, first } = await registry.withKeyFailover(provider.id, async ({ secret }) => {
           const client = await registry.sdkClient(provider, modelId, secret);
-          const iterator = client.stream({ ...request, modelId })[Symbol.asyncIterator]();
-          return { iterator, first: await iterator.next() };
-        }, request.signal);
+          for (;;) {
+            signal?.throwIfAborted();
+            try {
+              const iterator = client.stream({ ...request, modelId })[Symbol.asyncIterator]();
+              return { iterator, first: await iterator.next() };
+            } catch (error) {
+              signal?.throwIfAborted();
+              const status = httpStatus(error);
+              if (gatewayRetries >= 2 || (status !== 502 && status !== 503 && status !== 504)) throw error;
+              const delay = (registry.options.gatewayRetryDelayMs ?? 400) * (gatewayRetries++ === 0 ? 1 : 3);
+              await sleep(delay, undefined, { signal });
+            }
+          }
+        }, signal);
         try {
-          for (let item = first; !item.done; item = await iterator.next()) yield item.value;
+          for (let item = first; !item.done; item = await iterator.next()) {
+            yield item.value.type === "done" ? { ...item.value, modelId } : item.value;
+          }
         } finally { await iterator.return?.(); }
       },
     };
