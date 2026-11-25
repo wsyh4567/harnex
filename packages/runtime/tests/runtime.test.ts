@@ -635,6 +635,104 @@ describe("native SDK adapters", () => {
     expect(seenConfigs[3]?.thinkingConfig).toEqual({ includeThoughts: true });
     expect(seenConfigs[4]?.thinkingConfig).toBeUndefined();
   });
+
+  test("OpenAI dual-protocol uses Responses API with reasoning summaries and adaptively falls back to Chat Completions", async () => {
+    // Case 1: Native Responses API streaming reasoning summaries + text + tool calls
+    const responseUrls: string[] = [];
+    const responsesFetch = mockFetch((url, init) => {
+      responseUrls.push(url);
+      const body = JSON.parse(String(init?.body));
+      expect(body.reasoning).toEqual({ summary: "auto" });
+      return sse([
+        { type: "response.reasoning_summary_text.delta", delta: "Analyzing step 1..." },
+        { type: "response.output_text.delta", delta: "Final GPT answer" },
+        { type: "response.output_item.added", output_index: 1, item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: "" } },
+        { type: "response.function_call_arguments.delta", output_index: 1, item_id: "fc_1", delta: '{"path":"a.ts"}' },
+        { type: "response.completed", response: { model: "gpt-next", status: "completed", output: [], usage: { input_tokens: 100, output_tokens: 40, input_tokens_details: { cached_tokens: 20 }, output_tokens_details: { reasoning_tokens: 15 } } } },
+      ]);
+    });
+    const gpt = new OpenAiLlmClient(new OpenAI({ apiKey: "mock", baseURL: "https://responses-ok.test/v1", fetch: responsesFetch }),
+      "gpt-next", pricing, "openai");
+    const chunks = [];
+    for await (const c of gpt.stream(input)) chunks.push(c);
+    expect(responseUrls).toEqual(["https://responses-ok.test/v1/responses"]);
+    expect(chunks[0]).toEqual({ type: "reasoning_delta", delta: "Analyzing step 1..." });
+    expect(chunks[1]).toEqual({ type: "text_delta", delta: "Final GPT answer" });
+    expect(chunks[2]).toEqual({ type: "tool_call", toolCall: tool("read_file", { path: "a.ts" }, "call_1") });
+
+    // Case 2: OpenAI endpoint without /v1/responses falls back to /v1/chat/completions and caches
+    const fallbackUrls: string[] = [];
+    const fallbackFetch = mockFetch((url) => {
+      fallbackUrls.push(url);
+      if (url.endsWith("/responses")) return new Response(JSON.stringify({ error: { message: "Not found /responses" } }), { status: 404, headers: { "content-type": "application/json" } });
+      return Response.json({ model: "gpt-proxy", choices: [{ finish_reason: "stop", message: { content: "via chat" } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    });
+    const gptFallback = new OpenAiLlmClient(new OpenAI({ apiKey: "mock", baseURL: "https://chat-only.test/v1", fetch: fallbackFetch }),
+      "gpt-proxy", pricing, "openai");
+    expect((await gptFallback.complete(input)).content).toBe("via chat");
+    expect((await gptFallback.complete(input)).content).toBe("via chat");
+    expect(fallbackUrls).toEqual([
+      "https://chat-only.test/v1/responses",
+      "https://chat-only.test/v1/chat/completions",
+      "https://chat-only.test/v1/chat/completions",
+    ]);
+
+    // Case 3: openai_compatible endpoint hosting a Responses-only model automatically upgrades to /v1/responses
+    const reverseUrls: string[] = [];
+    const reverseFetch = mockFetch((url) => {
+      reverseUrls.push(url);
+      if (url.endsWith("/chat/completions")) {
+        return new Response(JSON.stringify({ error: { message: "This model is only supported in v1/responses" } }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      return Response.json({
+        model: "codex-next",
+        status: "completed",
+        output: [
+          { type: "reasoning", id: "rs_1", summary: [{ type: "summary_text", text: "Plan via responses" }] },
+          { type: "message", id: "m_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Done via responses" }] },
+        ],
+        usage: { input_tokens: 20, output_tokens: 10, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 5 } },
+      });
+    });
+    const compat = new OpenAiLlmClient(new OpenAI({ apiKey: "mock", baseURL: "https://responses-only-compat.test/v1", fetch: reverseFetch }),
+      "codex-next", pricing, "openai_compatible");
+    const upgraded = await compat.complete(input);
+    expect(upgraded.content).toBe("Done via responses");
+    expect(upgraded.reasoning).toBe("Plan via responses");
+    expect(reverseUrls).toEqual([
+      "https://responses-only-compat.test/v1/chat/completions",
+      "https://responses-only-compat.test/v1/responses",
+    ]);
+  });
+
+  test("Anthropic negotiates 3-tier adaptive thinking (adaptive -> enabled -> none) and caches discovered tier", async () => {
+    const seenThinking: Array<unknown> = [];
+    const fetch = mockFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      seenThinking.push(body.thinking ?? null);
+      if (body.thinking?.type === "adaptive") {
+        return new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "thinking.type: Input should be 'enabled' or 'disabled'" } }),
+          { status: 400, headers: { "content-type": "application/json" } });
+      }
+      return Response.json({
+        model: "claude-mid",
+        stop_reason: "end_turn",
+        content: [{ type: "thinking", thinking: "stepwise thought", signature: "sig" }, { type: "text", text: "final answer" }],
+        usage: { input_tokens: 50, output_tokens: 20 },
+      });
+    });
+    const claude = new AnthropicLlmClient(new Anthropic({ apiKey: "mock", baseURL: "https://claude-tier.test", fetch }), "claude-mid", pricing);
+    const first = await claude.complete(input);
+    expect(first.reasoning).toBe("stepwise thought");
+    expect(first.content).toBe("final answer");
+    // Second call uses cached "enabled" tier directly without re-probing "adaptive"
+    await claude.complete(input);
+    expect(seenThinking).toEqual([
+      { type: "adaptive" },
+      { type: "enabled", budget_tokens: 4096 },
+      { type: "enabled", budget_tokens: 4096 },
+    ]);
+  });
 });
 
 describe("SQLite trace store", () => {

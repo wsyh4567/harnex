@@ -719,4 +719,8 @@ export const enUSMessages = {
   "chat.activityDoneTools": "Used {tools} tool(s)",
   "chat.activityReasoningOnly": "View model reasoning",
   "chat.toolOutput": "Output",
+  "prov.apiProtocolLabel": "OpenAI API Protocol",
+  "prov.protocolAuto": "Protocol: Auto Dual",
+  "prov.protocolResponses": "Protocol: Responses API",
+  "prov.protocolChat": "Protocol: Chat Completions",
 } as const;

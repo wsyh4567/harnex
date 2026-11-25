@@ -3,12 +3,33 @@ import type { LlmClient, LlmRequest, LlmResponse, LlmStreamChunk, LlmToolCall } 
 import type { ModelPricing } from "@harnex/protocol";
 import { finalChunks, pricedUsage, toolArguments } from "./shared.ts";
 
+type AnthropicThinkingTier = "adaptive" | "enabled" | "none";
+
 const thoughts = new WeakMap<LlmToolCall, Anthropic.ContentBlockParam[]>();
+const thinkingTierCache = new Map<string, AnthropicThinkingTier>();
+
+function isAnthropicThinkingRejected(error: unknown): boolean {
+  const value = error as { status?: unknown; message?: unknown } | null;
+  const message = typeof value?.message === "string" ? value.message : String(error ?? "");
+  const status = typeof value?.status === "number" ? value.status : undefined;
+  if (status !== undefined && status !== 400 && status !== 422) return false;
+  return /thinking|adaptive|budget_tokens|temperature|extra inputs are not permitted|invalid.*type/i.test(message);
+}
+
+function nextAnthropicTier(current: AnthropicThinkingTier): AnthropicThinkingTier | undefined {
+  if (current === "adaptive") return "enabled";
+  if (current === "enabled") return "none";
+  return undefined;
+}
 
 export class AnthropicLlmClient implements LlmClient {
   constructor(private readonly sdk: Anthropic, private readonly model: string, private readonly pricing?: ModelPricing) {}
 
-  private params(request: LlmRequest): Anthropic.MessageCreateParamsNonStreaming {
+  private cacheKey(targetModel: string): string {
+    return `${this.sdk.baseURL ?? ""}::${targetModel}`;
+  }
+
+  private params(request: LlmRequest, tier: AnthropicThinkingTier): Anthropic.MessageCreateParamsNonStreaming {
     const system: Anthropic.TextBlockParam[] = request.systemPrompt ? [{ type: "text", text: request.systemPrompt }] : [];
     const messages: Anthropic.MessageParam[] = [];
     for (const message of request.messages) {
@@ -35,9 +56,22 @@ export class AnthropicLlmClient implements LlmClient {
       if (last?.role === role && Array.isArray(last.content)) last.content.push(...parts);
       else messages.push({ role, content: parts });
     }
+    const baseMaxTokens = request.maxTokens ?? 4096;
+    const thinkingMaxTokens = Math.max(baseMaxTokens, 8192);
+    const budgetTokens = Math.min(4096, Math.max(1024, Math.floor(thinkingMaxTokens / 2)));
+    const thinkingExtra =
+      tier === "adaptive"
+        ? ({ thinking: { type: "adaptive" } } as unknown as Partial<Anthropic.MessageCreateParamsNonStreaming>)
+        : tier === "enabled"
+          ? { thinking: { type: "enabled" as const, budget_tokens: budgetTokens } }
+          : {};
     return {
-      model: request.modelId ?? this.model, system, messages,
-      max_tokens: request.maxTokens ?? 4096, temperature: request.temperature,
+      model: request.modelId ?? this.model,
+      system,
+      messages,
+      max_tokens: tier === "none" ? baseMaxTokens : thinkingMaxTokens,
+      ...(tier === "none" ? { temperature: request.temperature } : {}),
+      ...thinkingExtra,
       tools: request.tools?.map((tool) => ({
         name: tool.name, description: tool.description, input_schema: { ...tool.inputSchema, type: "object" },
       })),
@@ -66,22 +100,65 @@ export class AnthropicLlmClient implements LlmClient {
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
-    return this.result(await this.sdk.messages.create(this.params(request), { signal: request.signal }));
+    const targetModel = request.modelId ?? this.model;
+    const key = this.cacheKey(targetModel);
+    let tier = thinkingTierCache.get(key) ?? "adaptive";
+    for (;;) {
+      try {
+        const message = await this.sdk.messages.create(this.params(request, tier), { signal: request.signal });
+        thinkingTierCache.set(key, tier);
+        return this.result(message);
+      } catch (error) {
+        const next = nextAnthropicTier(tier);
+        if (!next || !isAnthropicThinkingRejected(error)) throw error;
+        tier = next;
+        thinkingTierCache.set(key, tier);
+      }
+    }
   }
 
   async *stream(request: LlmRequest): AsyncIterable<LlmStreamChunk> {
-    const stream = this.sdk.messages.stream(this.params(request), { signal: request.signal });
-    for await (const event of stream) {
-      if (event.type === "content_block_start") {
-        const block = event.content_block;
-        if (block.type === "text" && block.text) yield { type: "text_delta", delta: block.text };
-        if (block.type === "thinking" && block.thinking) yield { type: "reasoning_delta", delta: block.thinking };
+    const targetModel = request.modelId ?? this.model;
+    const key = this.cacheKey(targetModel);
+    let tier = thinkingTierCache.get(key) ?? "adaptive";
+
+    const open = async (activeTier: AnthropicThinkingTier) => {
+      const stream = this.sdk.messages.stream(this.params(request, activeTier), { signal: request.signal });
+      const iterator = stream[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      return { stream, iterator, first };
+    };
+
+    let opened: Awaited<ReturnType<typeof open>>;
+    for (;;) {
+      try {
+        opened = await open(tier);
+        thinkingTierCache.set(key, tier);
+        break;
+      } catch (error) {
+        const next = nextAnthropicTier(tier);
+        if (!next || !isAnthropicThinkingRejected(error)) throw error;
+        tier = next;
+        thinkingTierCache.set(key, tier);
       }
-      if (event.type !== "content_block_delta") continue;
-      if (event.delta.type === "text_delta") yield { type: "text_delta", delta: event.delta.text };
-      if (event.delta.type === "thinking_delta") yield { type: "reasoning_delta", delta: event.delta.thinking };
     }
-    const result = this.result(await stream.finalMessage());
-    yield* finalChunks(result.toolCalls, result.usage, result.finishReason);
+
+    try {
+      for (let item = opened.first; !item.done; item = await opened.iterator.next()) {
+        const event = item.value;
+        if (event.type === "content_block_start") {
+          const block = event.content_block;
+          if (block.type === "text" && block.text) yield { type: "text_delta", delta: block.text };
+          if (block.type === "thinking" && block.thinking) yield { type: "reasoning_delta", delta: block.thinking };
+        }
+        if (event.type !== "content_block_delta") continue;
+        if (event.delta.type === "text_delta") yield { type: "text_delta", delta: event.delta.text };
+        if (event.delta.type === "thinking_delta") yield { type: "reasoning_delta", delta: event.delta.thinking };
+      }
+      const result = this.result(await opened.stream.finalMessage());
+      yield* finalChunks(result.toolCalls, result.usage, result.finishReason);
+    } finally {
+      await opened.iterator.return?.();
+    }
   }
 }

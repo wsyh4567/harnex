@@ -268,7 +268,7 @@ export class ProviderRegistry {
     }
     return new OpenAiLlmClient(new OpenAI({ ...sdkOptions, apiKey: key ?? "local",
       baseURL: provider.kind === "ollama" && !baseURL.endsWith("/v1") ? `${baseURL}/v1` : baseURL,
-    }), modelId, pricing, provider.kind);
+    }), modelId, pricing, provider.kind, provider.apiProtocol ?? "auto");
   }
 
   async client(slot: ModelSlot, override?: string, providerIdOverride?: string): Promise<LlmClient> {

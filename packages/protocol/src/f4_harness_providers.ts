@@ -105,6 +105,9 @@ export type ReplayComparison = z.infer<typeof ReplayComparisonSchema>;
 export const KeyRotationStrategySchema = z.enum(["priority_failover", "round_robin"]);
 export type KeyRotationStrategy = z.infer<typeof KeyRotationStrategySchema>;
 
+export const OpenAiApiProtocolSchema = z.enum(["auto", "responses", "chat_completions"]);
+export type OpenAiApiProtocol = z.infer<typeof OpenAiApiProtocolSchema>;
+
 export const ProviderKeyEntrySchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -121,6 +124,7 @@ export const ProviderConfigSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   kind: ProviderKindSchema,
+  apiProtocol: OpenAiApiProtocolSchema.optional(),
   baseUrl: z.string().min(1),
   models: z.array(z.string()).default([]),
   pinnedModels: z.array(z.string()).optional(),

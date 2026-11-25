@@ -3,6 +3,7 @@ import type {
   KeyRotationStrategy,
   ModelPricing,
   ModelSlot,
+  OpenAiApiProtocol,
   ProviderConfig,
   ProviderKind,
 } from "@harnex/protocol";
@@ -86,6 +87,7 @@ export function ProvidersPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ProviderKind>("openai_compatible");
+  const [apiProtocol, setApiProtocol] = useState<OpenAiApiProtocol>("auto");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -128,6 +130,7 @@ export function ProvidersPanel() {
     setEditingId(null);
     setName("");
     setKind("openai_compatible");
+    setApiProtocol("auto");
     setBaseUrl("https://api.openai.com/v1");
     setApiKey("");
     setShowApiKey(false);
@@ -140,6 +143,7 @@ export function ProvidersPanel() {
   const applyPreset = (preset: ProviderPreset) => {
     setName(preset.name);
     setKind(preset.kind);
+    setApiProtocol("auto");
     setBaseUrl(preset.baseUrl);
     setModelsInput(preset.models.join(", "));
     setEnabledDraft(true);
@@ -150,6 +154,7 @@ export function ProvidersPanel() {
     setEditingId(prov.id);
     setName(prov.name);
     setKind(prov.kind);
+    setApiProtocol(prov.apiProtocol ?? "auto");
     setBaseUrl(prov.baseUrl);
     setApiKey("");
     setShowApiKey(false);
@@ -164,6 +169,7 @@ export function ProvidersPanel() {
     id: prov.id,
     name: prov.name,
     kind: prov.kind,
+    apiProtocol: prov.apiProtocol,
     baseUrl: prov.baseUrl,
     models: prov.models,
     pinnedModels: prov.pinnedModels,
@@ -187,6 +193,8 @@ export function ProvidersPanel() {
           id: editingId ?? undefined,
           name: name.trim(),
           kind,
+          apiProtocol:
+            kind === "openai" || kind === "openai_compatible" ? apiProtocol : undefined,
           baseUrl: baseUrl.trim(),
           models: modelsInput
             .split(",")
@@ -651,6 +659,20 @@ export function ProvidersPanel() {
               buttonClassName="text-[11px]"
               menuClassName="w-44"
             />
+            {(kind === "openai" || kind === "openai_compatible") && (
+              <ChoiceMenu
+                ariaLabel={t("prov.apiProtocolLabel")}
+                value={apiProtocol}
+                options={[
+                  { value: "auto", label: t("prov.protocolAuto") },
+                  { value: "responses", label: t("prov.protocolResponses") },
+                  { value: "chat_completions", label: t("prov.protocolChat") },
+                ]}
+                onChange={(val) => setApiProtocol(val as OpenAiApiProtocol)}
+                buttonClassName="text-[11px]"
+                menuClassName="w-48"
+              />
+            )}
             <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-[var(--hx-text-2)]">
               <input
                 type="checkbox"

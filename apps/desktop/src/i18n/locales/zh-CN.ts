@@ -721,4 +721,8 @@ export const zhCNMessages: Messages = {
   "chat.activityDoneTools": "使用了 {tools} 个工具",
   "chat.activityReasoningOnly": "查看模型推理过程",
   "chat.toolOutput": "执行输出",
+  "prov.apiProtocolLabel": "OpenAI 接口协议",
+  "prov.protocolAuto": "协议：自动双协议",
+  "prov.protocolResponses": "协议：Responses API",
+  "prov.protocolChat": "协议：Chat Completions",
 };
