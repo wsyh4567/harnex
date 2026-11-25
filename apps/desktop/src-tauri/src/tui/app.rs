@@ -363,6 +363,7 @@ impl App {
             if let TuiTurn::Assistant {
                 activities,
                 activities_expanded,
+                running,
                 ..
             } = turn
             {
@@ -372,7 +373,7 @@ impl App {
                         *expanded = self.tools_expanded;
                     }
                 }
-                if !self.tools_expanded && !turn_is_running(turn) {
+                if !self.tools_expanded && !*running {
                     *activities_expanded = false;
                 }
             }
@@ -759,10 +760,6 @@ impl App {
         }
         self.turns.last_mut().unwrap()
     }
-}
-
-fn turn_is_running(turn: &TuiTurn) -> bool {
-    matches!(turn, TuiTurn::Assistant { running: true, .. })
 }
 
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {

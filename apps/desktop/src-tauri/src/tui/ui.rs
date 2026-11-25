@@ -464,8 +464,12 @@ fn render_approval_modal(frame: &mut Frame, request: &crate::protocol::ApprovalR
             ),
         ]),
         Line::from(vec![
-            Span::styled("Reason: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(request.reason.clone(), Style::default().fg(Color::Gray)),
+            Span::styled("Summary: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(request.summary.clone(), Style::default().fg(Color::Gray)),
+        ]),
+        Line::from(vec![
+            Span::styled("Detail: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(request.detail.clone(), Style::default().fg(Color::DarkGray)),
         ]),
         Line::raw(""),
         Line::from(vec![
