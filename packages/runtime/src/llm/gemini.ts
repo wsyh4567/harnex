@@ -4,6 +4,17 @@ import type { ModelPricing } from "@harnex/protocol";
 import { finalChunks, pricedUsage, toolArguments, zeroUsage } from "./shared.ts";
 
 const callParts = new WeakMap<LlmToolCall, Part>();
+const unsupportedThinkingModels = new Set<string>();
+
+function isThinkingConfigRejected(error: unknown): boolean {
+  const value = error as { status?: unknown; message?: unknown } | null;
+  const msg = typeof value?.message === "string" ? value.message : String(error ?? "");
+  const status = typeof value?.status === "number" ? value.status
+    : Number(/^got status: (\d{3})\b/.exec(msg)?.[1]);
+  if (Number.isFinite(status) && status !== 400) return false;
+  return /thinking(?:_?config)?|include_?thoughts|unknown name.*thinking|thought.*not supported|budget.*thinking/i.test(msg);
+}
+
 const callFromPart = (part: Part): LlmToolCall[] => {
   const call = part.functionCall;
   if (!call?.name) return [];
@@ -15,7 +26,7 @@ const callFromPart = (part: Part): LlmToolCall[] => {
 export class GeminiLlmClient implements LlmClient {
   constructor(private readonly sdk: GoogleGenAI, private readonly model: string, private readonly pricing?: ModelPricing) {}
 
-  private params(request: LlmRequest): GenerateContentParameters {
+  private params(request: LlmRequest, includeThoughts: boolean): GenerateContentParameters {
     const contents: Content[] = [];
     const calls = new Map<string, LlmToolCall>();
     const system = request.systemPrompt ? [request.systemPrompt] : [];
@@ -42,7 +53,6 @@ export class GeminiLlmClient implements LlmClient {
       else contents.push({ role, parts });
     }
     const targetModel = request.modelId ?? this.model;
-    const includeThoughts = /(?:gemini-(?:2\.5|3)|thinking)/i.test(targetModel);
     return { model: targetModel, contents, config: {
       // Implicit caching uses the unchanged message prefix; Gemini has no ephemeral block parameter.
       systemInstruction: system.join("\n\n") || undefined, abortSignal: request.signal,
@@ -65,33 +75,58 @@ export class GeminiLlmClient implements LlmClient {
   }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
-    const response = await this.sdk.models.generateContent(this.params(request));
+    const targetModel = request.modelId ?? this.model;
+    const wantThoughts = !unsupportedThinkingModels.has(targetModel);
+    let response: GenerateContentResponse;
+    try {
+      response = await this.sdk.models.generateContent(this.params(request, wantThoughts));
+    } catch (error) {
+      if (!wantThoughts || !isThinkingConfigRejected(error)) throw error;
+      unsupportedThinkingModels.add(targetModel);
+      response = await this.sdk.models.generateContent(this.params(request, false));
+    }
     const candidate = response.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
     const toolCalls = parts.flatMap(callFromPart);
     return {
       content: parts.map((part) => part.thought ? "" : part.text ?? "").join(""),
       reasoning: parts.map((part) => part.thought ? part.text ?? "" : "").join("") || undefined,
-      toolCalls, modelId: response.modelVersion ?? request.modelId ?? this.model, usage: this.usage(response),
+      toolCalls, modelId: response.modelVersion ?? targetModel, usage: this.usage(response),
       finishReason: candidate?.finishReason === "MAX_TOKENS" ? "length" :
         !candidate || (candidate.finishReason && candidate.finishReason !== "STOP") ? "error" : toolCalls.length ? "tool_calls" : "stop",
     };
   }
 
   async *stream(request: LlmRequest): AsyncIterable<LlmStreamChunk> {
-    const stream = await this.sdk.models.generateContentStream(this.params(request));
+    const targetModel = request.modelId ?? this.model;
+    const wantThoughts = !unsupportedThinkingModels.has(targetModel);
+    const open = async (includeThoughts: boolean) => {
+      const iterable = await this.sdk.models.generateContentStream(this.params(request, includeThoughts));
+      const iterator = iterable[Symbol.asyncIterator]();
+      return { iterator, first: await iterator.next() };
+    };
+    const { iterator, first } = await open(wantThoughts).catch(async (error) => {
+      if (!wantThoughts || !isThinkingConfigRejected(error)) throw error;
+      unsupportedThinkingModels.add(targetModel);
+      return open(false);
+    });
     let usage = zeroUsage();
     let finishReason: LlmResponse["finishReason"] | undefined;
     const calls: LlmToolCall[] = [];
-    for await (const response of stream) {
-      if (response.usageMetadata) usage = this.usage(response);
-      const candidate = response.candidates?.[0];
-      if (candidate?.finishReason === "MAX_TOKENS") finishReason = "length";
-      else if (candidate?.finishReason && candidate.finishReason !== "STOP") finishReason = "error";
-      for (const part of candidate?.content?.parts ?? []) {
-        if (part.text) yield { type: part.thought ? "reasoning_delta" : "text_delta", delta: part.text };
-        calls.push(...callFromPart(part));
+    try {
+      for (let item = first; !item.done; item = await iterator.next()) {
+        const response = item.value;
+        if (response.usageMetadata) usage = this.usage(response);
+        const candidate = response.candidates?.[0];
+        if (candidate?.finishReason === "MAX_TOKENS") finishReason = "length";
+        else if (candidate?.finishReason && candidate.finishReason !== "STOP") finishReason = "error";
+        for (const part of candidate?.content?.parts ?? []) {
+          if (part.text) yield { type: part.thought ? "reasoning_delta" : "text_delta", delta: part.text };
+          calls.push(...callFromPart(part));
+        }
       }
+    } finally {
+      await iterator.return?.(undefined);
     }
     yield* finalChunks(calls, usage, finishReason);
   }

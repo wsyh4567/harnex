@@ -592,6 +592,49 @@ describe("native SDK adapters", () => {
     expect(chunks).toEqual([{ type: "reasoning_delta", delta: "consider" }, { type: "text_delta", delta: "answer" },
       { type: "tool_call", toolCall: full.toolCalls[0] }, { type: "done", usage: full.usage }]);
   });
+
+  test("Gemini adaptively requests includeThoughts for any model name and caches fallback when unsupported", async () => {
+    const seenConfigs: Array<Record<string, unknown> | undefined> = [];
+    const okResponse = { modelVersion: "custom-model", candidates: [{ finishReason: "STOP", content: { parts: [{ text: "ok" }] } }] };
+    const sdk = {
+      models: {
+        generateContent: async (params: { config?: Record<string, unknown> }) => {
+          seenConfigs.push(params.config);
+          if (params.config?.thinkingConfig) {
+            throw Object.assign(new Error("got status: 400 INVALID_ARGUMENT: thinkingConfig is not supported for this model"), { status: 400 });
+          }
+          return okResponse;
+        },
+        generateContentStream: async function* (params: { config?: Record<string, unknown> }) {
+          seenConfigs.push(params.config);
+          if (params.config?.thinkingConfig) {
+            throw Object.assign(new Error("got status: 400 INVALID_ARGUMENT: Unknown name \"thinkingConfig\""), { status: 400 });
+          }
+          yield okResponse;
+        },
+      },
+    } as unknown as GoogleGenAI;
+
+    // Arbitrary model name (no version hardcoding) tries includeThoughts first, falls back once, then caches
+    const legacy = new GeminiLlmClient(sdk, "legacy-non-thinking-alias", pricing);
+    expect((await legacy.complete(input)).content).toBe("ok");
+    expect(seenConfigs[0]?.thinkingConfig).toEqual({ includeThoughts: true });
+    expect(seenConfigs[1]?.thinkingConfig).toBeUndefined();
+    // Second call skips thinkingConfig directly using cached capability
+    expect((await legacy.complete(input)).content).toBe("ok");
+    expect(seenConfigs).toHaveLength(3);
+    expect(seenConfigs[2]?.thinkingConfig).toBeUndefined();
+
+    // Streaming also falls back cleanly and caches capability
+    const streamLegacy = new GeminiLlmClient(sdk, "legacy-stream-alias", pricing);
+    const streamed: string[] = [];
+    for await (const chunk of streamLegacy.stream(input)) {
+      if (chunk.type === "text_delta" && chunk.delta) streamed.push(chunk.delta);
+    }
+    expect(streamed).toEqual(["ok"]);
+    expect(seenConfigs[3]?.thinkingConfig).toEqual({ includeThoughts: true });
+    expect(seenConfigs[4]?.thinkingConfig).toBeUndefined();
+  });
 });
 
 describe("SQLite trace store", () => {
