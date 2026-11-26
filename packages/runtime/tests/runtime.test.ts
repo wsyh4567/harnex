@@ -87,7 +87,7 @@ describe("foreground runner", () => {
     const llm = new MockLlmClient((input, index) => {
       if (index === 0) { expect(input.tools).toBeUndefined(); return answer("", [tool("shell", { command: "unexpected" })]); }
       if (index === 1 || index === 3) return answer();
-      expect(input.tools?.map(({ name }) => name)).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals"]);
+      expect(input.tools?.map(({ name }) => name)).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals", "web_fetch"]);
       return answer("", [tool("read_file", { path: "data.txt" }), tool("read_file", { path: "../data.txt" }, "escape"),
         tool("set_goals", { goals: [{ id: "validate", title: "Check input", status: "completed" }] }),
         tool("write_file", { path: "bad.txt", content: "not written" })]);
@@ -863,7 +863,7 @@ describe("Pi-aligned core tools (read pagination, edit_file, grep_files, find_fi
   test("exposes read-only search tools in plan mode and edit_file in craft mode", () => {
     expect(toolsFor("ask")).toEqual([]);
     const planNames = toolsFor("plan").map((t) => t.name);
-    expect(planNames).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals"]);
+    expect(planNames).toEqual(["read_file", "list_files", "find_files", "grep_files", "set_goals", "web_fetch"]);
     const craftNames = toolsFor("craft").map((t) => t.name);
     expect(craftNames).toContain("edit_file");
     expect(craftNames).toContain("grep_files");

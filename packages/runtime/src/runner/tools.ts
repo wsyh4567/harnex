@@ -2,8 +2,21 @@ import { constants } from "node:fs";
 import { open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import type { HarnessTree, LlmToolCall, LlmToolDef, RustBridge, TaskRunRequest } from "@harnex/interfaces";
-import { IMMUTABLE_L0_PATH_PATTERNS, GoalItemSchema, type ExecResult, type GoalItem, type UntrustedSourceTag } from "@harnex/protocol";
+import type { HarnessTree, LlmClient, LlmToolCall, LlmToolDef, RustBridge, TaskRunRequest } from "@harnex/interfaces";
+import { IMMUTABLE_L0_PATH_PATTERNS, GoalItemSchema, type ExecResult, type GoalItem, type ReasoningEffort, type TokenUsage, type UntrustedSourceTag } from "@harnex/protocol";
+import { listSubagentProfiles } from "../stubs/slots.ts";
+import {
+  DELEGATE_SUBAGENT_TOOL_DEF,
+  DELEGATE_SUBAGENT_TOOL_NAME,
+  runReadOnlySubagent,
+  SUBAGENT_ALLOWED_TOOLS,
+} from "./subagent.ts";
+import {
+  executeWebFetch,
+  WEB_FETCH_TOOL_DEF,
+  WEB_FETCH_TOOL_NAME,
+  type WebFetchOptions,
+} from "./web_fetch.ts";
 
 const path = { type: "string" }, text = { type: "string" }, args = { type: "array", items: text };
 const integer = { type: "integer" }, bool = { type: "boolean" };
@@ -16,7 +29,7 @@ const MAX_SEARCH_FILES = 600;
 const MAX_GREP_FILE_BYTES = 512 * 1024;
 const SKIP_WALK_DIRS = new Set([".git", "node_modules", ".harnex", "dist", "target", ".vite"]);
 
-const readTools = [
+const readTools: LlmToolDef[] = [
   def("read_file", "Read a UTF-8 file (optional 1-indexed line offset & limit)", { path, offset: integer, limit: integer }, ["path"]),
   def("list_files", "List directory entries", { path }, ["path"]),
   def("find_files", "Find workspace files by glob or substring", { path, pattern: text, maxResults: integer }, []),
@@ -25,7 +38,9 @@ const readTools = [
     type: "object", properties: { id: text, title: text, status: { type: "string", enum: ["pending", "in_progress", "completed", "failed"] }, detail: text },
     required: ["id", "title", "status"],
   } } }, ["goals"]),
+  WEB_FETCH_TOOL_DEF,
 ];
+const subagentReadOnlyTools: LlmToolDef[] = readTools.filter((tool) => SUBAGENT_ALLOWED_TOOLS.has(tool.name));
 const effectTools = [
   def("edit_file", "Apply exact non-overlapping {oldText,newText} edits via L0", {
     path,
@@ -37,8 +52,11 @@ const effectTools = [
   def("run_script", "Run a pinned harness script via L0", { scriptPath: path, args }, ["scriptPath"]),
 ];
 
-export function toolsFor(mode: TaskRunRequest["mode"]): LlmToolDef[] {
-  return mode === "ask" ? [] : mode === "plan" ? readTools : [...readTools, ...effectTools];
+export function toolsFor(mode: TaskRunRequest["mode"], tree?: HarnessTree): LlmToolDef[] {
+  if (mode === "ask") return [];
+  const hasSubagents = tree ? listSubagentProfiles(tree).length > 0 : false;
+  const baseRead = hasSubagents ? [...readTools, DELEGATE_SUBAGENT_TOOL_DEF] : [...readTools];
+  return mode === "plan" ? baseRead : [...baseRead, ...effectTools];
 }
 
 function protectedPath(path: string): boolean {
@@ -217,15 +235,29 @@ export function applyTargetedEdits(
   };
 }
 
-interface ToolOutcome {
+export interface ToolOutcome {
   output: string;
   error?: string;
   exitCode?: number;
   durationMs?: number;
   status: "completed" | "failed" | "denied";
   sourceTags?: UntrustedSourceTag[];
+  taintedWeb?: boolean;
   changedFile?: { path: string; content?: string };
   goals?: GoalItem[];
+  usage?: TokenUsage;
+}
+
+export interface RunToolOptions {
+  llm?: LlmClient;
+  modelId?: string;
+  providerIdOverride?: string;
+  reasoningEffort?: ReasoningEffort;
+  signal?: AbortSignal;
+  webFetchOptions?: Pick<WebFetchOptions, "fetchImpl" | "lookupHost" | "timeoutMs" | "maxBytes" | "maxRedirects">;
+  subagentDepth?: number;
+  subagentMaxSteps?: number;
+  onSourceTags?: (tags: readonly UntrustedSourceTag[]) => void;
 }
 
 function resultOf(result: ExecResult): ToolOutcome {
@@ -243,14 +275,107 @@ const required = z.string().min(1);
 const pathArgs = z.object({ path: required });
 
 export async function runTool(call: LlmToolCall, request: TaskRunRequest, tree: HarnessTree, bridge: RustBridge,
-  sourceTags: UntrustedSourceTag[], readLimit: number,
+  sourceTags: UntrustedSourceTag[], readLimit: number, options?: RunToolOptions,
 ): Promise<ToolOutcome> {
-  if (!toolsFor(request.mode).some((tool) => tool.name === call.name)) {
+  if (!toolsFor(request.mode, tree).some((tool) => tool.name === call.name)) {
     return { status: "denied", output: "", error: `Tool ${call.name} is unavailable in ${request.mode} mode` };
   }
   const intent = { threadId: request.threadId, workspaceRoot: request.workspacePath,
     sandboxMode: request.dryRunShadow ? "cow-shadow" as const : "workspace-write" as const, sourceTags };
   switch (call.name) {
+    case WEB_FETCH_TOOL_NAME: {
+      const parsed = z.object({
+        url: required,
+        maxChars: z.number().finite().positive().optional(),
+      }).parse(call.arguments);
+      const fetched = await executeWebFetch({
+        ...options?.webFetchOptions,
+        url: parsed.url,
+        maxChars: parsed.maxChars,
+        signal: options?.signal,
+      });
+      options?.onSourceTags?.(["web"]);
+      const titlePart = fetched.title ? ` — ${fetched.title}` : "";
+      const truncPart = fetched.truncated ? ", truncated" : "";
+      const summary = `Fetched ${fetched.finalUrl} (HTTP ${fetched.status}${titlePart}, ${fetched.bytesRead} bytes${truncPart})`;
+      const output = fetched.content ? `${summary}\n\n${fetched.content}` : summary;
+      return {
+        status: "completed",
+        output,
+        sourceTags: ["web"],
+        taintedWeb: true,
+      };
+    }
+    case DELEGATE_SUBAGENT_TOOL_NAME: {
+      const parsed = z.object({
+        profile: required,
+        task: required,
+      }).parse(call.arguments);
+      if (!options?.llm) {
+        return { status: "failed", output: "", error: "Sub-agent delegation requires an active LLM client" };
+      }
+      const childTags = new Set<UntrustedSourceTag>();
+      const subResult = await runReadOnlySubagent(
+        {
+          tree,
+          llm: options.llm,
+          bridge,
+          readOnlyTools: subagentReadOnlyTools,
+          executeReadOnlyTool: async (name, toolArgs, signal) => {
+            if (!SUBAGENT_ALLOWED_TOOLS.has(name)) {
+              return { output: "", error: `Tool "${name}" is not allowed in read-only sub-agent mode` };
+            }
+            const childCall: LlmToolCall = { id: `sub:${crypto.randomUUID()}`, name, arguments: toolArgs };
+            const childOutcome = await runTool(
+              childCall,
+              { ...request, mode: "plan" },
+              tree,
+              bridge,
+              sourceTags,
+              readLimit,
+              {
+                ...options,
+                signal: signal ?? options.signal,
+                subagentDepth: (options.subagentDepth ?? 0) + 1,
+              },
+            );
+            for (const tag of childOutcome.sourceTags ?? []) childTags.add(tag);
+            const childWeb = childOutcome.taintedWeb === true || childOutcome.sourceTags?.includes("web") === true;
+            if (childWeb) {
+              childTags.add("web");
+              options.onSourceTags?.(["web"]);
+            }
+            return {
+              output: childOutcome.output,
+              error: childOutcome.error,
+              taintedWeb: childWeb,
+            };
+          },
+          depth: options.subagentDepth ?? 0,
+          maxSteps: options.subagentMaxSteps,
+          modelId: options.modelId,
+          providerIdOverride: options.providerIdOverride,
+          reasoningEffort: options.reasoningEffort,
+          signal: options.signal,
+        },
+        parsed.profile,
+        parsed.task,
+      );
+      if (subResult.taintedWeb) {
+        childTags.add("web");
+        options.onSourceTags?.(["web"]);
+      }
+      const totalTokens = subResult.usage.inputTokens + subResult.usage.outputTokens;
+      const summary = `[sub-agent:${subResult.profileName}] ${subResult.steps} step(s), ${subResult.toolCalls} tool call(s), ${totalTokens} tokens${subResult.taintedWeb ? ", web-tainted" : ""}`;
+      const output = subResult.output ? `${summary}\n\n${subResult.output}` : summary;
+      return {
+        status: "completed",
+        output,
+        sourceTags: childTags.size > 0 ? [...childTags] : undefined,
+        taintedWeb: subResult.taintedWeb,
+        usage: subResult.usage,
+      };
+    }
     case "set_goals": {
       const { goals } = z.object({ goals: z.array(GoalItemSchema).max(40) }).parse(call.arguments);
       if (new Set(goals.map((goal) => goal.id)).size !== goals.length) throw new Error("Goal IDs must be unique");

@@ -9,7 +9,7 @@ import {
   type AppConfig, type EvolutionProposal, type ProviderImportResult, type ReplayComparison, type Thread,
 } from "@harnex/protocol";
 import { EvolutionScheduler, inspectHarnessCompatibility, inspectHarnessHygiene, probeTask, withShadowWorkspace } from "@harnex/evolution";
-import { ForegroundTaskRunner, importCcSwitch, importMagpie, ProviderRegistry, RoutedLlmClient, SqliteTraceStore } from "@harnex/runtime";
+import { ForegroundTaskRunner, importCcSwitch, importMagpie, ProviderRegistry, RoutedLlmClient, SqliteTraceStore, type ForegroundRunnerOptions } from "@harnex/runtime";
 import { z } from "zod";
 import { version as appVersion } from "../../../apps/desktop/src-tauri/tauri.conf.json";
 import replay from "../../../examples/first-run-challenge/recorded_replay.json";
@@ -77,6 +77,7 @@ export interface SidecarServerOptions {
   ccSwitchDbPath?: string;
   magpieConfigPath?: string;
   fetch?: typeof fetch;
+  webFetchOptions?: ForegroundRunnerOptions["webFetchOptions"];
   reportError?: (error: unknown) => void;
 }
 
@@ -113,7 +114,13 @@ export class SidecarServer {
       this.trace = options.trace ?? this.ownedTrace!;
       this.llm = options.llm ?? new RoutedLlmClient(this.registry);
       this.harness = new InMemoryHarnessStore(this.bridge);
-      const runner = new ForegroundTaskRunner({ bridge: this.bridge, llm: this.llm, harness: this.harness, trace: this.trace });
+      const runner = new ForegroundTaskRunner({
+        bridge: this.bridge,
+        llm: this.llm,
+        harness: this.harness,
+        trace: this.trace,
+        webFetchOptions: options.webFetchOptions,
+      });
       this.runner = new ShadowBoundRunner(runner, this.bridge);
       this.scheduler = new EvolutionScheduler({ bridge: this.bridge, llm: this.llm, runner: this.runner, harnessStore: this.harness, traceStore: this.trace });
       this.bridge.onEvent = (event) => {
@@ -205,7 +212,9 @@ export class SidecarServer {
       this.running.set(thread.id, active);
       const run = this.runner.runTask({ threadId: thread.id, workspacePath: thread.workspacePath, prompt: input.prompt,
         mode: input.mode ?? thread.mode, pinnedCommitSha: thread.pinnedCommitSha, domain: thread.domain,
-        modelOverride: input.modelOverride, providerIdOverride: input.providerIdOverride });
+        modelOverride: input.modelOverride, providerIdOverride: input.providerIdOverride,
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+        ...(input.attachments?.length ? { attachments: input.attachments } : {}) });
       this.track(run.then((result) => {
         this.running.delete(thread.id);
         resolve({ runId: result.runId });

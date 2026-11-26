@@ -1,12 +1,15 @@
 import type { TaskRunner, TaskRunRequest } from "@harnex/interfaces";
+import type { RuntimeRunRequest } from "@harnex/runtime";
 import type { StdioRustBridge } from "./stdio_bridge.ts";
+
+export type ShadowRunRequest = TaskRunRequest & Pick<RuntimeRunRequest, "sourceTags" | "reasoningEffort" | "attachments">;
 
 export class ShadowBoundRunner implements TaskRunner {
   private readonly binding = new Map<string, AbortController>();
 
   constructor(private readonly runner: TaskRunner, private readonly bridge: StdioRustBridge) {}
 
-  async runTask(request: TaskRunRequest) {
+  async runTask(request: ShadowRunRequest) {
     if (!request.dryRunShadow) return this.runner.runTask(request);
     const { threadId, workspacePath, pinnedCommitSha } = request;
     const controller = new AbortController();
