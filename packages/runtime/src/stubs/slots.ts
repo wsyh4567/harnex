@@ -9,10 +9,40 @@ const frontmatter = (document: string) => {
   return { fields, body: document.slice(block[0].length) };
 };
 
+export const DISABLED_ORGANS_PATH = "meta/disabled_organs.json";
+
+const DisabledOrgansSchema = z.object({
+  disabled: z.array(z.string()),
+});
+
+function normalizeOrganPath(raw: string): string {
+  return raw.trim().replaceAll("\\", "/").replace(/^(?:\.\/)+/, "");
+}
+
+export function loadDisabledOrgans(tree: HarnessTree): Set<string> {
+  const content = tree[DISABLED_ORGANS_PATH];
+  if (typeof content !== "string" || !content.trim()) return new Set();
+  try {
+    const parsed = DisabledOrgansSchema.safeParse(JSON.parse(content));
+    if (!parsed.success) return new Set();
+    const disabled = new Set<string>();
+    for (const entry of parsed.data.disabled) {
+      const normalized = normalizeOrganPath(entry);
+      if (normalized) disabled.add(normalized);
+    }
+    return disabled;
+  } catch {
+    return new Set();
+  }
+}
+
 export function loadMemory(tree: HarnessTree): string { return tree["memory/LongTermMEMORY.md"] ?? ""; }
 
-export function loadSkills(tree: HarnessTree) {
-  return Object.entries(tree).filter(([path]) => /^skills\/[^/]+\/SKILL\.md$/.test(path)).sort(([a], [b]) => a.localeCompare(b))
+export function loadSkills(tree: HarnessTree, options?: { includeDisabled?: boolean }) {
+  const disabled = options?.includeDisabled === true ? undefined : loadDisabledOrgans(tree);
+  return Object.entries(tree)
+    .filter(([path]) => /^skills\/[^/]+\/SKILL\.md$/.test(path) && !(disabled?.has(path)))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([path, document]) => {
       const { fields, body } = frontmatter(document);
       const metadata = z.object({ name: z.string().optional(), description: z.string().optional() }).parse(fields);
@@ -66,13 +96,37 @@ export async function assertBudget(bridge: Pick<RustBridge, "checkBudget">, esti
   if (!check.allowed || check.status.tripped) throw new BudgetExceededError(check.reason);
 }
 
-export function loadSubagentProfile(tree: HarnessTree, profilePath: string) {
-  if (!/^sub_agents\/[\w.-]+\.md$/.test(profilePath) || !Object.hasOwn(tree, profilePath)) {
+function resolveSubagentProfilePath(profilePath: string): string {
+  if (!profilePath || profilePath.includes("..") || profilePath.includes("\\")) {
     throw new Error("Unknown sub-agent profile");
   }
-  const { fields, body } = frontmatter(tree[profilePath]!);
+  if (/^sub_agents\/[\w.-]+\.md$/.test(profilePath)) {
+    return profilePath;
+  }
+  if (/^[\w.-]+$/.test(profilePath) && profilePath !== "." && !profilePath.includes("/")) {
+    return profilePath.endsWith(".md") ? `sub_agents/${profilePath}` : `sub_agents/${profilePath}.md`;
+  }
+  throw new Error("Unknown sub-agent profile");
+}
+
+export function loadSubagentProfile(tree: HarnessTree, profilePath: string) {
+  const resolvedPath = resolveSubagentProfilePath(profilePath);
+  if (!/^sub_agents\/[\w.-]+\.md$/.test(resolvedPath) || !Object.hasOwn(tree, resolvedPath)) {
+    throw new Error("Unknown sub-agent profile");
+  }
+  const { fields, body } = frontmatter(tree[resolvedPath]!);
   const metadata = z.object({ name: z.string().optional(), description: z.string().optional() }).parse(fields);
-  return { profilePath, name: metadata.name ?? profilePath.split("/")[1]!, description: metadata.description ?? "", instructions: body };
+  return { profilePath: resolvedPath, name: metadata.name ?? resolvedPath.split("/")[1]!, description: metadata.description ?? "", instructions: body };
+}
+
+export type SubagentProfile = ReturnType<typeof loadSubagentProfile>;
+
+export function listSubagentProfiles(tree: HarnessTree, options?: { includeDisabled?: boolean }): SubagentProfile[] {
+  const disabled = options?.includeDisabled === true ? undefined : loadDisabledOrgans(tree);
+  return Object.keys(tree)
+    .filter((path) => /^sub_agents\/[\w.-]+\.md$/.test(path) && !path.includes("..") && !(disabled?.has(path)))
+    .sort()
+    .map((path) => loadSubagentProfile(tree, path));
 }
 
 export function createWorkerSpawner(tree: HarnessTree, llm: LlmClient, bridge: RustBridge) {
