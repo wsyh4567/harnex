@@ -926,6 +926,7 @@ impl App {
                     .get("finalOutput")
                     .and_then(Value::as_str)
                     .unwrap_or("");
+                let tools_expanded = self.tools_expanded;
                 if let Some(TuiTurn::Assistant {
                     content,
                     started_at,
@@ -944,7 +945,7 @@ impl App {
                         *content = final_out.to_owned();
                     }
                     // Auto-collapse reasoning & completed tool details once done, matching Desktop UX
-                    if !self.tools_expanded {
+                    if !tools_expanded {
                         *activities_expanded = false;
                     }
                     for act in activities.iter_mut() {
