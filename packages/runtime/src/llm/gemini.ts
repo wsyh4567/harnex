@@ -1,10 +1,34 @@
 import type { Content, GenerateContentParameters, GenerateContentResponse, GoogleGenAI, Part } from "@google/genai";
 import type { LlmClient, LlmRequest, LlmResponse, LlmStreamChunk, LlmToolCall } from "@harnex/interfaces";
-import type { ModelPricing } from "@harnex/protocol";
+import type { MessageAttachmentInput, ModelPricing, ReasoningEffort } from "@harnex/protocol";
 import { finalChunks, pricedUsage, toolArguments, zeroUsage } from "./shared.ts";
 
+type ExplicitReasoningEffort = Exclude<ReasoningEffort, "auto">;
+type GeminiThinkingMode = "budget" | "thoughts_only" | "none";
+
+const GEMINI_EFFORT_BUDGETS: Record<ExplicitReasoningEffort, number> = {
+  low: 1024,
+  medium: 4096,
+  high: 12288,
+};
+
 const callParts = new WeakMap<LlmToolCall, Part>();
-const unsupportedThinkingModels = new Set<string>();
+const thinkingCapabilityCache = new Map<string, "thoughts_only" | "none">();
+
+function geminiBaseUrl(sdk: GoogleGenAI): string {
+  const internal = sdk as unknown as {
+    apiClient?: { getBaseUrl?: () => string; clientOptions?: { httpOptions?: { baseUrl?: string } } };
+    baseUrl?: string;
+    baseURL?: string;
+  };
+  return (
+    internal.apiClient?.getBaseUrl?.() ??
+    internal.apiClient?.clientOptions?.httpOptions?.baseUrl ??
+    internal.baseUrl ??
+    internal.baseURL ??
+    ""
+  );
+}
 
 function isThinkingConfigRejected(error: unknown): boolean {
   const value = error as { status?: unknown; message?: unknown } | null;
@@ -12,7 +36,28 @@ function isThinkingConfigRejected(error: unknown): boolean {
   const status = typeof value?.status === "number" ? value.status
     : Number(/^got status: (\d{3})\b/.exec(msg)?.[1]);
   if (Number.isFinite(status) && status !== 400) return false;
-  return /thinking(?:_?config)?|include_?thoughts|unknown name.*thinking|thought.*not supported|budget.*thinking/i.test(msg);
+  return /thinking(?:_?config|_?budget)?|include_?thoughts|unknown name.*thinking|thought.*not supported|budget.*thinking/i.test(msg);
+}
+
+function partitionAttachments(attachments?: MessageAttachmentInput[]): {
+  images: MessageAttachmentInput[];
+  fallbackNotes: string[];
+} {
+  const images: MessageAttachmentInput[] = [];
+  const fallbackNotes: string[] = [];
+  for (const att of attachments ?? []) {
+    if (att.mimeType.toLowerCase().startsWith("image/") && att.dataBase64.trim().length > 0) {
+      images.push(att);
+    } else {
+      fallbackNotes.push(`[Attached file: ${att.name} (${att.mimeType})]`);
+    }
+  }
+  return { images, fallbackNotes };
+}
+
+function combineTextWithNotes(text: string, notes: string[]): string {
+  if (!notes.length) return text;
+  return text ? `${text}\n${notes.join("\n")}` : notes.join("\n");
 }
 
 const callFromPart = (part: Part): LlmToolCall[] => {
@@ -26,7 +71,31 @@ const callFromPart = (part: Part): LlmToolCall[] => {
 export class GeminiLlmClient implements LlmClient {
   constructor(private readonly sdk: GoogleGenAI, private readonly model: string, private readonly pricing?: ModelPricing) {}
 
-  private params(request: LlmRequest, includeThoughts: boolean): GenerateContentParameters {
+  private cacheKey(targetModel: string): string {
+    return `${geminiBaseUrl(this.sdk)}::${targetModel}`;
+  }
+
+  private initialThinkingMode(request: LlmRequest, targetModel: string): GeminiThinkingMode {
+    const cached = thinkingCapabilityCache.get(this.cacheKey(targetModel));
+    if (cached === "none") return "none";
+    const explicitEffort = request.reasoningEffort && request.reasoningEffort !== "auto" ? request.reasoningEffort : undefined;
+    if (explicitEffort && cached !== "thoughts_only") return "budget";
+    return "thoughts_only";
+  }
+
+  private nextThinkingMode(current: GeminiThinkingMode, key: string): GeminiThinkingMode | undefined {
+    if (current === "budget") {
+      thinkingCapabilityCache.set(key, "thoughts_only");
+      return "thoughts_only";
+    }
+    if (current === "thoughts_only") {
+      thinkingCapabilityCache.set(key, "none");
+      return "none";
+    }
+    return undefined;
+  }
+
+  private params(request: LlmRequest, mode: GeminiThinkingMode): GenerateContentParameters {
     const contents: Content[] = [];
     const calls = new Map<string, LlmToolCall>();
     const system = request.systemPrompt ? [request.systemPrompt] : [];
@@ -41,6 +110,13 @@ export class GeminiLlmClient implements LlmClient {
         parts = [{ functionResponse: {
           name: call.name, response: { output: message.content }, id: callParts.get(call)?.functionCall?.id,
         } }];
+      } else if (message.role === "user" && message.attachments?.length) {
+        const { images, fallbackNotes } = partitionAttachments(message.attachments);
+        const textContent = combineTextWithNotes(message.content, fallbackNotes);
+        parts = textContent ? [{ text: textContent }] : [];
+        for (const att of images) {
+          parts.push({ inlineData: { mimeType: att.mimeType, data: att.dataBase64 } });
+        }
       } else {
         parts = message.content ? [{ text: message.content }] : [];
         for (const call of message.toolCalls ?? []) parts.push(callParts.get(call) ?? {
@@ -53,11 +129,19 @@ export class GeminiLlmClient implements LlmClient {
       else contents.push({ role, parts });
     }
     const targetModel = request.modelId ?? this.model;
+    const explicitEffort: ExplicitReasoningEffort | undefined =
+      request.reasoningEffort && request.reasoningEffort !== "auto" ? request.reasoningEffort : undefined;
+    const thinkingConfig =
+      mode === "budget" && explicitEffort
+        ? { includeThoughts: true, thinkingBudget: GEMINI_EFFORT_BUDGETS[explicitEffort] }
+        : mode === "thoughts_only"
+          ? { includeThoughts: true }
+          : undefined;
     return { model: targetModel, contents, config: {
       // Implicit caching uses the unchanged message prefix; Gemini has no ephemeral block parameter.
       systemInstruction: system.join("\n\n") || undefined, abortSignal: request.signal,
       temperature: request.temperature, maxOutputTokens: request.maxTokens,
-      ...(includeThoughts ? { thinkingConfig: { includeThoughts: true } } : {}),
+      ...(thinkingConfig ? { thinkingConfig } : {}),
       tools: request.tools?.length ? [{ functionDeclarations: request.tools.map((tool) => ({
         name: tool.name, description: tool.description,
         parameters: geminiSchema(tool.inputSchema),
@@ -76,14 +160,19 @@ export class GeminiLlmClient implements LlmClient {
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
     const targetModel = request.modelId ?? this.model;
-    const wantThoughts = !unsupportedThinkingModels.has(targetModel);
+    const key = this.cacheKey(targetModel);
+    let mode = this.initialThinkingMode(request, targetModel);
     let response: GenerateContentResponse;
-    try {
-      response = await this.sdk.models.generateContent(this.params(request, wantThoughts));
-    } catch (error) {
-      if (!wantThoughts || !isThinkingConfigRejected(error)) throw error;
-      unsupportedThinkingModels.add(targetModel);
-      response = await this.sdk.models.generateContent(this.params(request, false));
+    for (;;) {
+      try {
+        response = await this.sdk.models.generateContent(this.params(request, mode));
+        break;
+      } catch (error) {
+        if (!isThinkingConfigRejected(error)) throw error;
+        const next = this.nextThinkingMode(mode, key);
+        if (!next) throw error;
+        mode = next;
+      }
     }
     const candidate = response.candidates?.[0];
     const parts = candidate?.content?.parts ?? [];
@@ -99,17 +188,26 @@ export class GeminiLlmClient implements LlmClient {
 
   async *stream(request: LlmRequest): AsyncIterable<LlmStreamChunk> {
     const targetModel = request.modelId ?? this.model;
-    const wantThoughts = !unsupportedThinkingModels.has(targetModel);
-    const open = async (includeThoughts: boolean) => {
-      const iterable = await this.sdk.models.generateContentStream(this.params(request, includeThoughts));
+    const key = this.cacheKey(targetModel);
+    let mode = this.initialThinkingMode(request, targetModel);
+    const open = async (activeMode: GeminiThinkingMode) => {
+      const iterable = await this.sdk.models.generateContentStream(this.params(request, activeMode));
       const iterator = iterable[Symbol.asyncIterator]();
       return { iterator, first: await iterator.next() };
     };
-    const { iterator, first } = await open(wantThoughts).catch(async (error) => {
-      if (!wantThoughts || !isThinkingConfigRejected(error)) throw error;
-      unsupportedThinkingModels.add(targetModel);
-      return open(false);
-    });
+    let opened: Awaited<ReturnType<typeof open>>;
+    for (;;) {
+      try {
+        opened = await open(mode);
+        break;
+      } catch (error) {
+        if (!isThinkingConfigRejected(error)) throw error;
+        const next = this.nextThinkingMode(mode, key);
+        if (!next) throw error;
+        mode = next;
+      }
+    }
+    const { iterator, first } = opened;
     let usage = zeroUsage();
     let finishReason: LlmResponse["finishReason"] | undefined;
     const calls: LlmToolCall[] = [];

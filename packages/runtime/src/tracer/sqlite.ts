@@ -16,6 +16,36 @@ const migrations = [
 
 const boundedLimit = (limit: number) => Number.isFinite(limit) ? Math.min(10_000, Math.max(0, Math.trunc(limit))) : 0;
 
+function configureIncrementalAutoVacuum(db: Database, isMemory: boolean): void {
+  const mode = db.query<{ auto_vacuum: number }, []>("PRAGMA auto_vacuum").get()?.auto_vacuum ?? 0;
+  if (mode === 2) return;
+  const pageCount = db.query<{ page_count: number }, []>("PRAGMA page_count").get()?.page_count ?? 0;
+  try {
+    db.run("PRAGMA auto_vacuum = INCREMENTAL");
+    if (!isMemory && pageCount > 0) {
+      db.run("VACUUM");
+    }
+  } catch {
+    // Busy or read-only DB: skip one-time VACUUM rather than crashing startup.
+  }
+}
+
+export function reclaimFreePages(db: Database, maxPages = 256): number {
+  const limit = Number.isFinite(maxPages) ? Math.max(0, Math.trunc(maxPages)) : 0;
+  if (limit <= 0) return 0;
+  try {
+    const mode = db.query<{ auto_vacuum: number }, []>("PRAGMA auto_vacuum").get()?.auto_vacuum ?? 0;
+    if (mode !== 2) return 0;
+    const before = db.query<{ freelist_count: number }, []>("PRAGMA freelist_count").get()?.freelist_count ?? 0;
+    if (before <= 0) return 0;
+    db.query(`PRAGMA incremental_vacuum(${limit})`).all();
+    const after = db.query<{ freelist_count: number }, []>("PRAGMA freelist_count").get()?.freelist_count ?? 0;
+    return Math.max(0, before - after);
+  } catch {
+    return 0;
+  }
+}
+
 export class SqliteTraceStore implements TraceStore {
   readonly schemaVersion: number;
   private readonly db: Database;
@@ -24,6 +54,7 @@ export class SqliteTraceStore implements TraceStore {
     this.db = new Database(path, { create: true, strict: true });
     try {
       this.db.run("PRAGMA busy_timeout = 5000");
+      configureIncrementalAutoVacuum(this.db, path === ":memory:");
       this.schemaVersion = this.db.transaction(() => {
         this.db.run("CREATE TABLE IF NOT EXISTS schemaVersion (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
         const { version } = this.db.query<{ version: number }, []>("SELECT coalesce(max(version), 0) AS version FROM schemaVersion").get()!;
@@ -38,6 +69,10 @@ export class SqliteTraceStore implements TraceStore {
   }
 
   close(): void { this.db.close(); }
+
+  reclaimSpace(maxPages = 256): number {
+    return reclaimFreePages(this.db, maxPages);
+  }
 
   private one<T>(sql: string, id: string): T | null {
     const row = this.db.query<{ body: string }, [string]>(sql).get(id);
@@ -62,10 +97,24 @@ export class SqliteTraceStore implements TraceStore {
       this.db.run("DELETE FROM runs WHERE thread_id = ?", [threadId]);
       this.db.run("DELETE FROM threads WHERE id = ?", [threadId]);
     })();
+    reclaimFreePages(this.db, 256);
   }
 
   async appendMessage(message: ChatMessage): Promise<void> {
-    this.db.run("INSERT INTO messages VALUES (?, ?, ?)", [message.id, message.threadId, JSON.stringify(message)]);
+    const sanitized: ChatMessage = message.attachments?.length
+      ? {
+          ...message,
+          attachments: message.attachments.map(({ id, name, mimeType, sizeBytes, width, height }) => ({
+            id,
+            name,
+            mimeType,
+            sizeBytes,
+            ...(width !== undefined ? { width } : {}),
+            ...(height !== undefined ? { height } : {}),
+          })),
+        }
+      : message;
+    this.db.run("INSERT INTO messages VALUES (?, ?, ?)", [sanitized.id, sanitized.threadId, JSON.stringify(sanitized)]);
   }
 
   async listMessages(threadId: string): Promise<ChatMessage[]> {

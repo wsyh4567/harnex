@@ -37,6 +37,24 @@ export const ToolCallRecordSchema = z.object({
 });
 export type ToolCallRecord = z.infer<typeof ToolCallRecordSchema>;
 
+export const ReasoningEffortSchema = z.enum(["auto", "low", "medium", "high"]);
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
+export const MessageAttachmentMetaSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(120),
+  sizeBytes: z.number().int().nonnegative().max(4 * 1024 * 1024),
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+});
+export type MessageAttachmentMeta = z.infer<typeof MessageAttachmentMetaSchema>;
+
+export const MessageAttachmentInputSchema = MessageAttachmentMetaSchema.extend({
+  dataBase64: z.string().min(1).max(6 * 1024 * 1024),
+});
+export type MessageAttachmentInput = z.infer<typeof MessageAttachmentInputSchema>;
+
 export const ChatMessageSchema = z.object({
   id: z.string().min(1),
   threadId: z.string().min(1),
@@ -44,6 +62,7 @@ export const ChatMessageSchema = z.object({
   content: z.string(),
   reasoning: z.string().optional(),
   toolCalls: z.array(ToolCallRecordSchema).optional(),
+  attachments: z.array(MessageAttachmentMetaSchema).optional(),
   createdAt: z.string(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
@@ -103,6 +122,8 @@ export const RunnerStartParamsSchema = z.object({
   mode: ExecutionModeSchema.optional(),
   providerIdOverride: z.string().min(1).optional(),
   modelOverride: z.string().optional(),
+  reasoningEffort: ReasoningEffortSchema.optional(),
+  attachments: z.array(MessageAttachmentInputSchema).max(4).optional(),
 });
 export type RunnerStartParams = z.infer<typeof RunnerStartParamsSchema>;
 

@@ -1,4 +1,4 @@
-import type { ModelSlot, TokenUsage } from "@harnex/protocol";
+import type { MessageAttachmentInput, ModelSlot, ReasoningEffort, TokenUsage } from "@harnex/protocol";
 
 export interface LlmToolDef {
   name: string;
@@ -17,6 +17,7 @@ export interface LlmMessage {
   content: string;
   toolCallId?: string;
   toolCalls?: LlmToolCall[];
+  attachments?: MessageAttachmentInput[];
   cacheControl?: "ephemeral";
 }
 
@@ -29,6 +30,7 @@ export interface LlmRequest {
   tools?: LlmToolDef[];
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
   signal?: AbortSignal;
 }
 

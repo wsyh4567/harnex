@@ -1,9 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { LlmClient, LlmRequest, LlmResponse, LlmStreamChunk, LlmToolCall } from "@harnex/interfaces";
-import type { ModelPricing } from "@harnex/protocol";
+import type { MessageAttachmentInput, ModelPricing, ReasoningEffort } from "@harnex/protocol";
 import { finalChunks, pricedUsage, toolArguments } from "./shared.ts";
 
 type AnthropicThinkingTier = "adaptive" | "enabled" | "none";
+type ExplicitReasoningEffort = Exclude<ReasoningEffort, "auto">;
+
+const ANTHROPIC_EFFORT_BUDGETS: Record<ExplicitReasoningEffort, number> = {
+  low: 2048,
+  medium: 6144,
+  high: 12288,
+};
 
 const thoughts = new WeakMap<LlmToolCall, Anthropic.ContentBlockParam[]>();
 const thinkingTierCache = new Map<string, AnthropicThinkingTier>();
@@ -13,13 +20,34 @@ function isAnthropicThinkingRejected(error: unknown): boolean {
   const message = typeof value?.message === "string" ? value.message : String(error ?? "");
   const status = typeof value?.status === "number" ? value.status : undefined;
   if (status !== undefined && status !== 400 && status !== 422) return false;
-  return /thinking|adaptive|budget_tokens|temperature|extra inputs are not permitted|invalid.*type/i.test(message);
+  return /thinking|adaptive|budget_tokens|output_config|\beffort\b|temperature|extra inputs are not permitted|invalid.*type/i.test(message);
 }
 
 function nextAnthropicTier(current: AnthropicThinkingTier): AnthropicThinkingTier | undefined {
   if (current === "adaptive") return "enabled";
   if (current === "enabled") return "none";
   return undefined;
+}
+
+function partitionAttachments(attachments?: MessageAttachmentInput[]): {
+  images: MessageAttachmentInput[];
+  fallbackNotes: string[];
+} {
+  const images: MessageAttachmentInput[] = [];
+  const fallbackNotes: string[] = [];
+  for (const att of attachments ?? []) {
+    if (att.mimeType.toLowerCase().startsWith("image/") && att.dataBase64.trim().length > 0) {
+      images.push(att);
+    } else {
+      fallbackNotes.push(`[Attached file: ${att.name} (${att.mimeType})]`);
+    }
+  }
+  return { images, fallbackNotes };
+}
+
+function combineTextWithNotes(text: string, notes: string[]): string {
+  if (!notes.length) return text;
+  return text ? `${text}\n${notes.join("\n")}` : notes.join("\n");
 }
 
 export class AnthropicLlmClient implements LlmClient {
@@ -34,34 +62,70 @@ export class AnthropicLlmClient implements LlmClient {
     const messages: Anthropic.MessageParam[] = [];
     for (const message of request.messages) {
       const cache_control = message.cacheControl ? { type: message.cacheControl } : undefined;
-      const text: Anthropic.TextBlockParam = { type: "text", text: message.content, cache_control };
       if (message.role === "system") {
-        if (message.content) system.push(text);
+        if (message.content) system.push({ type: "text", text: message.content, cache_control });
         continue;
       }
       if (message.role === "tool" && !message.toolCallId) throw new Error("Tool result is missing its call ID");
-      const parts: Anthropic.ContentBlockParam[] = message.role === "tool" ? [{
-        type: "tool_result", tool_use_id: message.toolCallId!, content: message.content, cache_control,
-      }] : [
-        ...(message.toolCalls?.[0] ? thoughts.get(message.toolCalls[0]) ?? [] : []),
-        ...(message.content ? [text] : []),
-        ...(message.toolCalls ?? []).map((call, index, calls): Anthropic.ToolUseBlockParam => ({
-          type: "tool_use", id: call.id, name: call.name, input: call.arguments,
-          cache_control: !message.content && index === calls.length - 1 ? cache_control : undefined,
-        })),
-      ];
+      let parts: Anthropic.ContentBlockParam[];
+      if (message.role === "tool") {
+        parts = [{ type: "tool_result", tool_use_id: message.toolCallId!, content: message.content, cache_control }];
+      } else if (message.role === "user" && message.attachments?.length) {
+        const { images, fallbackNotes } = partitionAttachments(message.attachments);
+        const textContent = combineTextWithNotes(message.content, fallbackNotes);
+        parts = [
+          ...(textContent ? [{ type: "text" as const, text: textContent, cache_control }] : []),
+          ...images.map((att, index): Anthropic.ImageBlockParam => ({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: att.mimeType as Anthropic.Base64ImageSource["media_type"],
+              data: att.dataBase64,
+            },
+            ...(!textContent && index === images.length - 1 && cache_control ? { cache_control } : {}),
+          })),
+        ];
+      } else {
+        const text: Anthropic.TextBlockParam = { type: "text", text: message.content, cache_control };
+        parts = [
+          ...(message.toolCalls?.[0] ? thoughts.get(message.toolCalls[0]) ?? [] : []),
+          ...(message.content ? [text] : []),
+          ...(message.toolCalls ?? []).map((call, index, calls): Anthropic.ToolUseBlockParam => ({
+            type: "tool_use", id: call.id, name: call.name, input: call.arguments,
+            cache_control: !message.content && index === calls.length - 1 ? cache_control : undefined,
+          })),
+        ];
+      }
       if (!parts.length) continue;
       const role = message.role === "assistant" ? "assistant" : "user";
       const last = messages.at(-1);
       if (last?.role === role && Array.isArray(last.content)) last.content.push(...parts);
       else messages.push({ role, content: parts });
     }
+    const explicitEffort: ExplicitReasoningEffort | undefined =
+      request.reasoningEffort && request.reasoningEffort !== "auto" ? request.reasoningEffort : undefined;
     const baseMaxTokens = request.maxTokens ?? 4096;
-    const thinkingMaxTokens = Math.max(baseMaxTokens, 8192);
-    const budgetTokens = Math.min(4096, Math.max(1024, Math.floor(thinkingMaxTokens / 2)));
+    let thinkingMaxTokens: number;
+    let budgetTokens: number;
+    if (explicitEffort) {
+      const targetBudget = ANTHROPIC_EFFORT_BUDGETS[explicitEffort];
+      if (request.maxTokens === undefined) {
+        thinkingMaxTokens = Math.max(8192, targetBudget + 4096);
+        budgetTokens = targetBudget;
+      } else {
+        thinkingMaxTokens = Math.max(baseMaxTokens, 2048);
+        budgetTokens = Math.min(targetBudget, Math.max(1024, thinkingMaxTokens - 1024));
+      }
+    } else {
+      thinkingMaxTokens = Math.max(baseMaxTokens, 8192);
+      budgetTokens = Math.min(4096, Math.max(1024, Math.floor(thinkingMaxTokens / 2)));
+    }
     const thinkingExtra =
       tier === "adaptive"
-        ? ({ thinking: { type: "adaptive" } } as unknown as Partial<Anthropic.MessageCreateParamsNonStreaming>)
+        ? ({
+            thinking: { type: "adaptive" },
+            ...(explicitEffort ? { output_config: { effort: explicitEffort } } : {}),
+          } as unknown as Partial<Anthropic.MessageCreateParamsNonStreaming>)
         : tier === "enabled"
           ? { thinking: { type: "enabled" as const, budget_tokens: budgetTokens } }
           : {};

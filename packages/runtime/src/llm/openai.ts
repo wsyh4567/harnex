@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { LlmClient, LlmRequest, LlmResponse, LlmStreamChunk, LlmToolCall } from "@harnex/interfaces";
-import type { ModelPricing, OpenAiApiProtocol } from "@harnex/protocol";
+import type { MessageAttachmentInput, ModelPricing, OpenAiApiProtocol, ReasoningEffort } from "@harnex/protocol";
 import { finalChunks, pricedUsage, toolArguments, withUpstreamCost, zeroUsage } from "./shared.ts";
 
 type ChatParams = OpenAI.Chat.ChatCompletionCreateParams;
@@ -19,10 +19,37 @@ type ChatUsage = OpenAI.CompletionUsage & { prompt_cache_hit_tokens?: number; co
 type ResponsesUsage = OpenAI.Responses.ResponseUsage & { cost?: unknown; total_cost?: unknown; cost_usd?: unknown };
 
 type OpenAiWireMode = "responses_summary" | "responses_plain" | "chat" | "chat_no_temp";
+type ExplicitReasoningEffort = Exclude<ReasoningEffort, "auto">;
 
 const reasoningByCall = new WeakMap<LlmToolCall, { reasoning_content?: string; reasoning?: string }>();
 const responseReasoningByCall = new WeakMap<LlmToolCall, ResponseReasoningItem[]>();
 const protocolCache = new Map<string, OpenAiWireMode>();
+const unsupportedEffortCache = new Set<string>();
+
+function explicitEffortOf(effort?: ReasoningEffort): ExplicitReasoningEffort | undefined {
+  return effort && effort !== "auto" ? effort : undefined;
+}
+
+function partitionAttachments(attachments?: MessageAttachmentInput[]): {
+  images: MessageAttachmentInput[];
+  fallbackNotes: string[];
+} {
+  const images: MessageAttachmentInput[] = [];
+  const fallbackNotes: string[] = [];
+  for (const att of attachments ?? []) {
+    if (att.mimeType.toLowerCase().startsWith("image/") && att.dataBase64.trim().length > 0) {
+      images.push(att);
+    } else {
+      fallbackNotes.push(`[Attached file: ${att.name} (${att.mimeType})]`);
+    }
+  }
+  return { images, fallbackNotes };
+}
+
+function combineTextWithNotes(text: string, notes: string[]): string {
+  if (!notes.length) return text;
+  return text ? `${text}\n${notes.join("\n")}` : notes.join("\n");
+}
 
 function extractReasoningText(source?: Reasoning): string | undefined {
   if (!source) return undefined;
@@ -71,6 +98,20 @@ function isTemperatureRejected(error: unknown): boolean {
   return /temperature/i.test(message);
 }
 
+function isEffortOnlyRejected(error: unknown): boolean {
+  const { status, message } = errorStatusAndMessage(error);
+  if (status !== undefined && status !== 400 && status !== 422) return false;
+  return /reasoning[._]effort|\beffort\b/i.test(message);
+}
+
+function isChatReasoningEffortRejected(error: unknown): boolean {
+  const { status, message } = errorStatusAndMessage(error);
+  if (status !== undefined && status !== 400 && status !== 422) return false;
+  if (isChatRequiresResponses(error)) return false;
+  if (isTemperatureRejected(error) && !/reasoning|\beffort\b/i.test(message)) return false;
+  return /reasoning(?:_?effort)?|\beffort\b|unsupported parameter|unknown parameter|unrecognized request argument|extra_forbidden|additional properties/i.test(message);
+}
+
 function extractResponsesItemReasoning(item: ResponseReasoningItem): string {
   const parts: string[] = [];
   for (const s of item.summary ?? []) {
@@ -96,6 +137,17 @@ export class OpenAiLlmClient implements LlmClient {
     return `${this.sdk.baseURL ?? ""}::${this.kind}::${this.apiProtocol}::${targetModel}`;
   }
 
+  private effortCacheKey(targetModel: string, protocol: "responses" | "chat"): string {
+    return `${this.sdk.baseURL ?? ""}::${targetModel}::${protocol}`;
+  }
+
+  private activeEffort(request: LlmRequest, mode: OpenAiWireMode, targetModel: string): ExplicitReasoningEffort | undefined {
+    const effort = explicitEffortOf(request.reasoningEffort);
+    if (!effort || mode === "responses_plain") return undefined;
+    const protocol = mode === "responses_summary" ? "responses" : "chat";
+    return unsupportedEffortCache.has(this.effortCacheKey(targetModel, protocol)) ? undefined : effort;
+  }
+
   private initialMode(targetModel: string): OpenAiWireMode {
     const cached = protocolCache.get(this.cacheKey(targetModel));
     if (cached) return cached;
@@ -104,29 +156,76 @@ export class OpenAiLlmClient implements LlmClient {
     return this.kind === "openai" ? "responses_summary" : "chat";
   }
 
-  private nextFallbackMode(current: OpenAiWireMode, error: unknown): OpenAiWireMode | undefined {
+  private nextAttempt(
+    current: OpenAiWireMode,
+    usedEffort: ExplicitReasoningEffort | undefined,
+    error: unknown,
+    targetModel: string,
+  ): { mode: OpenAiWireMode; modeChanged: boolean } | undefined {
     const allowSwitch = this.apiProtocol === "auto";
     if (current === "responses_summary") {
-      if (allowSwitch && isResponsesEndpointUnavailable(error)) return "chat";
-      if (isResponsesReasoningRejected(error)) return "responses_plain";
+      if (allowSwitch && isResponsesEndpointUnavailable(error)) return { mode: "chat", modeChanged: true };
+      if (usedEffort && isEffortOnlyRejected(error)) {
+        unsupportedEffortCache.add(this.effortCacheKey(targetModel, "responses"));
+        return { mode: "responses_summary", modeChanged: false };
+      }
+      if (isResponsesReasoningRejected(error)) {
+        if (usedEffort) unsupportedEffortCache.add(this.effortCacheKey(targetModel, "responses"));
+        return { mode: "responses_plain", modeChanged: true };
+      }
       return undefined;
     }
     if (current === "responses_plain") {
-      if (allowSwitch && isResponsesEndpointUnavailable(error)) return "chat";
+      if (allowSwitch && isResponsesEndpointUnavailable(error)) return { mode: "chat", modeChanged: true };
       return undefined;
     }
-    if (current === "chat") {
-      if (allowSwitch && isChatRequiresResponses(error)) return "responses_summary";
-      if (isTemperatureRejected(error)) return "chat_no_temp";
+    if (current === "chat" || current === "chat_no_temp") {
+      if (allowSwitch && isChatRequiresResponses(error)) return { mode: "responses_summary", modeChanged: true };
+      if (usedEffort && isChatReasoningEffortRejected(error)) {
+        unsupportedEffortCache.add(this.effortCacheKey(targetModel, "chat"));
+        return { mode: current, modeChanged: false };
+      }
+      if (current === "chat" && isTemperatureRejected(error)) return { mode: "chat_no_temp", modeChanged: true };
       return undefined;
     }
     return undefined;
   }
 
-  private chatParams(request: LlmRequest, omitTemperature: boolean): Omit<ChatParams, "stream"> {
+  private chatParams(
+    request: LlmRequest,
+    omitTemperature: boolean,
+    effort?: ExplicitReasoningEffort,
+  ): Omit<ChatParams, "stream"> {
     const messages: ChatMessage[] = request.systemPrompt ? [{ role: "system", content: request.systemPrompt }] : [];
     for (const message of request.messages) {
       // OpenAI caches prefixes automatically; compatible gateways can accept explicit cache breakpoints.
+      if (message.role === "user" && message.attachments?.length) {
+        const { images, fallbackNotes } = partitionAttachments(message.attachments);
+        const text = combineTextWithNotes(message.content, fallbackNotes);
+        if (images.length > 0) {
+          const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
+          if (text) {
+            parts.push(
+              message.cacheControl && this.kind === "openai_compatible"
+                ? ({ type: "text", text, cache_control: { type: message.cacheControl } } as unknown as OpenAI.Chat.ChatCompletionContentPart)
+                : { type: "text", text },
+            );
+          }
+          for (const att of images) {
+            parts.push({
+              type: "image_url",
+              image_url: { url: `data:${att.mimeType};base64,${att.dataBase64}` },
+            });
+          }
+          messages.push({ role: "user", content: parts });
+        } else {
+          const content = message.cacheControl && this.kind === "openai_compatible"
+            ? [{ type: "text" as const, text, cache_control: { type: message.cacheControl } }]
+            : text;
+          messages.push({ role: "user", content });
+        }
+        continue;
+      }
       const content = message.cacheControl && this.kind === "openai_compatible" ?
         [{ type: "text" as const, text: message.content, cache_control: { type: message.cacheControl } }] : message.content;
       if (message.role === "tool") {
@@ -143,6 +242,7 @@ export class OpenAiLlmClient implements LlmClient {
       model: request.modelId ?? this.model,
       messages,
       ...(omitTemperature ? {} : { temperature: request.temperature }),
+      ...(effort ? { reasoning_effort: effort } : {}),
       ...(this.kind === "openai" ? { max_completion_tokens: request.maxTokens } : { max_tokens: request.maxTokens }),
       tools: request.tools?.map((tool) => ({ type: "function", function: {
         name: tool.name, description: tool.description, parameters: tool.inputSchema,
@@ -150,7 +250,11 @@ export class OpenAiLlmClient implements LlmClient {
     };
   }
 
-  private responsesParams(request: LlmRequest, includeReasoningSummary: boolean): Omit<ResponsesCreateParams, "stream"> {
+  private responsesParams(
+    request: LlmRequest,
+    includeReasoningSummary: boolean,
+    effort?: ExplicitReasoningEffort,
+  ): Omit<ResponsesCreateParams, "stream"> {
     const instructions: string[] = request.systemPrompt ? [request.systemPrompt] : [];
     const input: ResponseInputItem[] = [];
     for (const message of request.messages) {
@@ -181,14 +285,33 @@ export class OpenAiLlmClient implements LlmClient {
         }
         continue;
       }
-      input.push({ role: "user", content: message.content });
+      if (message.attachments?.length) {
+        const { images, fallbackNotes } = partitionAttachments(message.attachments);
+        const text = combineTextWithNotes(message.content, fallbackNotes);
+        if (images.length > 0) {
+          const content: OpenAI.Responses.ResponseInputMessageContentList = [];
+          if (text) content.push({ type: "input_text", text });
+          for (const att of images) {
+            content.push({
+              type: "input_image",
+              image_url: `data:${att.mimeType};base64,${att.dataBase64}`,
+              detail: "auto",
+            });
+          }
+          input.push({ role: "user", content });
+        } else {
+          input.push({ role: "user", content: text });
+        }
+      } else {
+        input.push({ role: "user", content: message.content });
+      }
     }
     return {
       model: request.modelId ?? this.model,
       instructions: instructions.join("\n\n") || undefined,
       input,
       ...(includeReasoningSummary
-        ? { reasoning: { summary: "auto" } }
+        ? { reasoning: effort ? { effort, summary: "auto" as const } : { summary: "auto" as const } }
         : request.temperature !== undefined
           ? { temperature: request.temperature }
           : {}),
@@ -288,16 +411,21 @@ export class OpenAiLlmClient implements LlmClient {
     };
   }
 
-  private async completeWithMode(request: LlmRequest, mode: OpenAiWireMode, targetModel: string): Promise<LlmResponse> {
+  private async completeWithMode(
+    request: LlmRequest,
+    mode: OpenAiWireMode,
+    targetModel: string,
+    effort?: ExplicitReasoningEffort,
+  ): Promise<LlmResponse> {
     if (mode === "responses_summary" || mode === "responses_plain") {
       const result = await this.sdk.responses.create(
-        { ...this.responsesParams(request, mode === "responses_summary"), stream: false },
+        { ...this.responsesParams(request, mode === "responses_summary", effort), stream: false },
         { signal: request.signal },
       );
       return this.fromResponse(result, targetModel);
     }
     const result = await this.sdk.chat.completions.create(
-      { ...this.chatParams(request, mode === "chat_no_temp"), stream: false },
+      { ...this.chatParams(request, mode === "chat_no_temp", effort), stream: false },
       { signal: request.signal },
     );
     return this.fromCompletion(result);
@@ -307,25 +435,33 @@ export class OpenAiLlmClient implements LlmClient {
     const targetModel = request.modelId ?? this.model;
     const key = this.cacheKey(targetModel);
     let mode = this.initialMode(targetModel);
-    const tried = new Set<OpenAiWireMode>();
+    const tried = new Set<string>();
     for (;;) {
-      tried.add(mode);
+      const effort = this.activeEffort(request, mode, targetModel);
+      const attemptKey = `${mode}::${effort ?? ""}`;
+      tried.add(attemptKey);
       try {
-        const res = await this.completeWithMode(request, mode, targetModel);
+        const res = await this.completeWithMode(request, mode, targetModel, effort);
         protocolCache.set(key, mode);
         return res;
       } catch (error) {
-        const next = this.nextFallbackMode(mode, error);
-        if (!next || tried.has(next)) throw error;
-        mode = next;
-        protocolCache.set(key, mode);
+        const next = this.nextAttempt(mode, effort, error, targetModel);
+        if (!next) throw error;
+        const nextEffort = this.activeEffort(request, next.mode, targetModel);
+        if (tried.has(`${next.mode}::${nextEffort ?? ""}`)) throw error;
+        mode = next.mode;
+        if (next.modeChanged) protocolCache.set(key, mode);
       }
     }
   }
 
-  private async *streamChat(request: LlmRequest, omitTemperature: boolean): AsyncIterable<LlmStreamChunk> {
+  private async *streamChat(
+    request: LlmRequest,
+    omitTemperature: boolean,
+    effort?: ExplicitReasoningEffort,
+  ): AsyncIterable<LlmStreamChunk> {
     const { data: stream, response } = await this.sdk.chat.completions.create({
-      ...this.chatParams(request, omitTemperature), stream: true, stream_options: { include_usage: true },
+      ...this.chatParams(request, omitTemperature, effort), stream: true, stream_options: { include_usage: true },
     }, { signal: request.signal }).withResponse();
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (contentType.includes("application/json")) {
@@ -370,9 +506,10 @@ export class OpenAiLlmClient implements LlmClient {
     request: LlmRequest,
     includeReasoningSummary: boolean,
     targetModel: string,
+    effort?: ExplicitReasoningEffort,
   ): AsyncIterable<LlmStreamChunk> {
     const { data: stream, response } = await this.sdk.responses.create(
-      { ...this.responsesParams(request, includeReasoningSummary), stream: true },
+      { ...this.responsesParams(request, includeReasoningSummary, effort), stream: true },
       { signal: request.signal },
     ).withResponse();
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -474,13 +611,13 @@ export class OpenAiLlmClient implements LlmClient {
     const targetModel = request.modelId ?? this.model;
     const key = this.cacheKey(targetModel);
     let mode = this.initialMode(targetModel);
-    const tried = new Set<OpenAiWireMode>();
+    const tried = new Set<string>();
 
-    const open = async (wireMode: OpenAiWireMode) => {
+    const open = async (wireMode: OpenAiWireMode, effort?: ExplicitReasoningEffort) => {
       const iterable =
         wireMode === "responses_summary" || wireMode === "responses_plain"
-          ? this.streamResponses(request, wireMode === "responses_summary", targetModel)
-          : this.streamChat(request, wireMode === "chat_no_temp");
+          ? this.streamResponses(request, wireMode === "responses_summary", targetModel, effort)
+          : this.streamChat(request, wireMode === "chat_no_temp", effort);
       const iterator = iterable[Symbol.asyncIterator]();
       const first = await iterator.next();
       return { iterator, first };
@@ -488,16 +625,19 @@ export class OpenAiLlmClient implements LlmClient {
 
     let opened: { iterator: AsyncIterator<LlmStreamChunk>; first: IteratorResult<LlmStreamChunk> };
     for (;;) {
-      tried.add(mode);
+      const effort = this.activeEffort(request, mode, targetModel);
+      tried.add(`${mode}::${effort ?? ""}`);
       try {
-        opened = await open(mode);
+        opened = await open(mode, effort);
         protocolCache.set(key, mode);
         break;
       } catch (error) {
-        const next = this.nextFallbackMode(mode, error);
-        if (!next || tried.has(next)) throw error;
-        mode = next;
-        protocolCache.set(key, mode);
+        const next = this.nextAttempt(mode, effort, error, targetModel);
+        if (!next) throw error;
+        const nextEffort = this.activeEffort(request, next.mode, targetModel);
+        if (tried.has(`${next.mode}::${nextEffort ?? ""}`)) throw error;
+        mode = next.mode;
+        if (next.modeChanged) protocolCache.set(key, mode);
       }
     }
 
