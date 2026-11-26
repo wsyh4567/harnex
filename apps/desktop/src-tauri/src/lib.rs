@@ -6,6 +6,7 @@ pub mod hooks;
 pub mod keyring;
 mod pricing_catalog;
 pub mod protocol;
+pub mod risk;
 pub mod runtime;
 pub mod sandbox_os;
 pub mod security;

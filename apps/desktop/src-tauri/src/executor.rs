@@ -3,6 +3,7 @@ use crate::{
     git_store::{GenomeBundle, GitStore},
     guardian::{Evaluator, Guardian, Operation, ReviewInput, RulesEvaluator, Verdict},
     protocol::*,
+    risk::{classify_operation, OperationContext, RiskAssessment},
     sandbox_os::{self, ProcessSpec, Program, Sandbox},
     security::{sha256, ExecPolicy, TrustStore},
     sidecar::rpc_error,
@@ -189,11 +190,12 @@ impl Executor {
         thread: &str,
         operation: Operation,
         path: &str,
+        args: &[String],
         mode: SandboxMode,
         tags: &[UntrustedSourceTag],
         policy: ExecPolicyAction,
         network: bool,
-        risky: bool,
+        high_privilege: bool,
         identity: impl Serialize,
     ) -> L0Result<()> {
         if policy == ExecPolicyAction::Forbidden {
@@ -202,8 +204,26 @@ impl Executor {
                 "execution policy forbids this command",
             ));
         }
+        let assessment = classify_operation(&OperationContext {
+            operation,
+            command_or_path: path,
+            args,
+            policy,
+            allow_network: network,
+            env_non_empty: false,
+            inside_sandbox: true,
+            source_tags: tags,
+            needs_human_trust: false,
+            high_privilege,
+        });
         let untrusted_source = tags.iter().any(|tag| *tag != UntrustedSourceTag::Local);
-        if policy == ExecPolicyAction::Allow && !risky && !network && !untrusted_source {
+        let risky = high_privilege || assessment.risk_level >= RiskLevel::High;
+        if policy == ExecPolicyAction::Allow
+            && assessment.risk_level == RiskLevel::Low
+            && !risky
+            && !network
+            && !untrusted_source
+        {
             return Ok(());
         }
         let fingerprint = sha256(
@@ -218,27 +238,22 @@ impl Executor {
         } else {
             ApprovalRequestKind::ShellCommand
         };
-        let request = request(
-            thread,
-            kind,
-            path,
-            tags,
-            if risky || network || untrusted_source {
-                RiskLevel::High
-            } else {
-                RiskLevel::Medium
-            },
-            None,
-            None,
-        );
+        let mut request = request(thread, kind, path, tags, assessment, None, None);
         if self.mode() == RsiMode::Auto {
             let input = ReviewInput::new(
                 operation, path, mode, network, policy, tags, risky, false, true,
             );
-            let (verdict, decision) = self
+            let (verdict, mut decision) = self
                 .guardian
                 .review(&request.request_id, thread, &input)
                 .await;
+            if assessment.risk_level > decision.risk_level {
+                decision.risk_level = assessment.risk_level;
+                decision.risk_reason_code = Some(assessment.reason_code);
+            }
+            let guardian_escalated =
+                decision.risk_reason_code == Some(RiskReasonCode::GuardianEscalated);
+            let decision_level = decision.risk_level;
             let mut log = self.decisions.lock().unwrap();
             if log.len() == 1000 {
                 log.pop_front();
@@ -252,7 +267,12 @@ impl Executor {
                         "Guardian denied the operation",
                     ))
                 }
-                Verdict::Human => (),
+                Verdict::Human => {
+                    if guardian_escalated && request.risk_level < RiskLevel::High {
+                        request.risk_level = request.risk_level.max(decision_level);
+                        request.risk_reason_code = Some(RiskReasonCode::GuardianEscalated);
+                    }
+                }
             }
         }
         match (self.approval)(request).await {
@@ -283,6 +303,7 @@ impl Executor {
             &intent.thread_id,
             Operation::Write,
             &intent.target_path,
+            &[],
             intent.sandbox_mode,
             &intent.source_tags,
             ExecPolicyAction::Allow,
@@ -324,6 +345,7 @@ impl Executor {
             &intent.thread_id,
             Operation::Delete,
             &intent.target_path,
+            &[],
             intent.sandbox_mode,
             &intent.source_tags,
             ExecPolicyAction::Prompt,
@@ -373,34 +395,16 @@ impl Executor {
             .read()
             .unwrap()
             .evaluate(&intent.command, &intent.args);
-        let name = intent.command.to_ascii_lowercase();
-        let name = name.strip_suffix(".exe").unwrap_or(&name);
-        let risky = policy != ExecPolicyAction::Allow
-            || matches!(
-                name,
-                "bash"
-                    | "sh"
-                    | "zsh"
-                    | "cmd"
-                    | "powershell"
-                    | "pwsh"
-                    | "python"
-                    | "python3"
-                    | "node"
-                    | "bun"
-                    | "rm"
-                    | "chmod"
-                    | "chown"
-            );
         self.gate(
             &intent.thread_id,
             Operation::Shell,
             &intent.command,
+            &intent.args,
             intent.sandbox_mode,
             &intent.source_tags,
             policy,
             intent.allow_network,
-            risky,
+            false,
             (
                 "shell",
                 &intent.workspace_root,
@@ -458,6 +462,7 @@ impl Executor {
             &intent.thread_id,
             Operation::Script,
             &intent.script_path,
+            &intent.args,
             intent.sandbox_mode,
             &intent.source_tags,
             ExecPolicyAction::Allow,
@@ -560,6 +565,7 @@ impl Executor {
             thread,
             Operation::Proposal,
             &paths.join(", "),
+            &[],
             SandboxMode::ReadOnly,
             tags,
             ExecPolicyAction::Prompt,
@@ -588,6 +594,7 @@ impl Executor {
             "evolution",
             Operation::Proposal,
             target_sha,
+            &[],
             SandboxMode::ReadOnly,
             &[],
             ExecPolicyAction::Prompt,
@@ -612,17 +619,33 @@ impl Executor {
         }
         let current = sha256(bytes);
         let previous = self.trust.get(kind, id).and_then(|record| record.sha256);
-        let kind_request = if kind == TrustKind::Hook {
-            ApprovalRequestKind::HookTrust
+        let (kind_request, operation) = if kind == TrustKind::Hook {
+            (ApprovalRequestKind::HookTrust, Operation::Hook)
         } else {
-            ApprovalRequestKind::HighPrivilegeProposal
+            (ApprovalRequestKind::HighPrivilegeProposal, Operation::Script)
         };
+        let rel_path = id
+            .strip_prefix("workspace:")
+            .and_then(|rest| rest.rsplit_once(':').map(|(_, rel)| rel))
+            .unwrap_or(id);
+        let assessment = classify_operation(&OperationContext {
+            operation,
+            command_or_path: rel_path,
+            args: &[],
+            policy: ExecPolicyAction::Prompt,
+            allow_network: false,
+            env_non_empty: false,
+            inside_sandbox: true,
+            source_tags: tags,
+            needs_human_trust: true,
+            high_privilege: kind != TrustKind::Hook,
+        });
         let approval = request(
             thread,
             kind_request,
             id,
             tags,
-            RiskLevel::High,
+            assessment,
             Some(current.clone()),
             previous,
         );
@@ -699,7 +722,7 @@ fn request(
     kind: ApprovalRequestKind,
     command_or_path: &str,
     tags: &[UntrustedSourceTag],
-    risk_level: RiskLevel,
+    assessment: RiskAssessment,
     sha256: Option<String>,
     previous_sha256: Option<String>,
 ) -> ApprovalRequest {
@@ -710,7 +733,8 @@ fn request(
         summary: format!("Review {command_or_path}"),
         detail: "The operation requires human approval".into(),
         command_or_path: command_or_path.into(),
-        risk_level,
+        risk_level: assessment.risk_level,
+        risk_reason_code: Some(assessment.reason_code),
         sha256,
         previous_sha256,
         source_tags: tags.to_vec(),

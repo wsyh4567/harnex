@@ -1,9 +1,12 @@
-use crate::protocol::*;
+use crate::{
+    protocol::*,
+    risk::{classify_operation, OperationContext, RiskAssessment},
+};
 use chrono::Utc;
 use serde::Serialize;
 use std::{future::Future, pin::Pin, time::Duration};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
     Write,
@@ -186,16 +189,39 @@ impl<E: Evaluator> Guardian<E> {
         thread_id: &str,
         input: &ReviewInput,
     ) -> (Verdict, GuardianDecision) {
-        let (verdict, risk_level, reason) =
+        let base = classify_operation(&OperationContext {
+            operation: input.operation,
+            command_or_path: &input.command_or_path,
+            args: &[],
+            policy: input.policy,
+            allow_network: input.network,
+            env_non_empty: false,
+            inside_sandbox: input.inside_sandbox,
+            source_tags: &input.source_tags,
+            needs_human_trust: input.needs_human_trust,
+            high_privilege: input.high_risk && matches!(input.operation, Operation::Proposal),
+        });
+        let assessment = if input.high_risk {
+            base.escalate(RiskAssessment::new(
+                RiskLevel::High,
+                RiskReasonCode::PolicyPrompt,
+            ))
+        } else {
+            base
+        };
+
+        let (verdict, risk_level, risk_reason_code, reason) =
             if !input.inside_sandbox || input.policy == ExecPolicyAction::Forbidden {
                 (
                     Verdict::Deny,
-                    RiskLevel::Critical,
+                    assessment.risk_level.max(RiskLevel::Critical),
+                    assessment.reason_code,
                     "Sandbox or execution policy denied the operation",
                 )
             } else if input.high_risk
                 || input.needs_human_trust
                 || input.network
+                || assessment.risk_level >= RiskLevel::High
                 || input
                     .source_tags
                     .iter()
@@ -203,7 +229,8 @@ impl<E: Evaluator> Guardian<E> {
             {
                 (
                     Verdict::Human,
-                    RiskLevel::High,
+                    assessment.risk_level.max(RiskLevel::High),
+                    assessment.reason_code,
                     "Human review is required for this operation",
                 )
             } else {
@@ -211,16 +238,19 @@ impl<E: Evaluator> Guardian<E> {
                     Ok(Verdict::Allow) => (
                         Verdict::Allow,
                         RiskLevel::Low,
+                        assessment.reason_code,
                         "Guardian approved the operation",
                     ),
                     Ok(Verdict::Deny) => (
                         Verdict::Deny,
-                        RiskLevel::High,
+                        assessment.risk_level.max(RiskLevel::High),
+                        RiskReasonCode::GuardianEscalated,
                         "Guardian denied the operation",
                     ),
                     _ => (
                         Verdict::Human,
-                        RiskLevel::Medium,
+                        assessment.risk_level.max(RiskLevel::Medium),
+                        RiskReasonCode::GuardianEscalated,
                         "Guardian did not approve the operation",
                     ),
                 }
@@ -237,6 +267,7 @@ impl<E: Evaluator> Guardian<E> {
                 }
                 .into(),
                 risk_level,
+                risk_reason_code: Some(risk_reason_code),
                 reason: reason.into(),
                 command_or_path: input.command_or_path.clone(),
                 model_id: self.0.model_id().into(),
@@ -319,6 +350,7 @@ mod tests {
             let (verdict, record) = guardian.review("request", "thread", &input).await;
             assert_eq!(verdict, expected);
             assert!(record.sanitized_input_only);
+            assert!(record.risk_reason_code.is_some());
         }
         assert_eq!(guardian.0 .0.load(Ordering::Relaxed), 1);
     }

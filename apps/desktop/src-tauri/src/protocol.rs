@@ -171,13 +171,30 @@ pub enum ApprovalDecision {
     Deny,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskLevel {
     Low,
     Medium,
     High,
     Critical,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskReasonCode {
+    SandboxEscape,
+    ForbiddenPolicy,
+    ShellSyntax,
+    InterpreterExecution,
+    FileDeletion,
+    NetworkAccess,
+    ProtectedPath,
+    UntrustedSource,
+    HookUntrusted,
+    HighPrivilegeProposal,
+    GuardianEscalated,
+    PolicyPrompt,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -325,6 +342,8 @@ pub struct ApprovalRequest {
     pub detail: String,
     pub command_or_path: String,
     pub risk_level: RiskLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_reason_code: Option<RiskReasonCode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -341,6 +360,8 @@ pub struct GuardianDecision {
     pub thread_id: String,
     pub decision: String,
     pub risk_level: RiskLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_reason_code: Option<RiskReasonCode>,
     pub reason: String,
     pub command_or_path: String,
     pub model_id: String,
@@ -418,6 +439,26 @@ pub struct ExportScanResult {
     pub excluded_files: Vec<String>,
     pub findings: Vec<SecretScanFinding>,
     pub safe_to_export: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewResult {
+    pub archive_path: String,
+    pub files: Vec<String>,
+    pub untrusted_executables: Vec<String>,
+    pub added_files: Vec<String>,
+    pub overwritten_files: Vec<String>,
+    pub unchanged_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganToggleResult {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub new_commit_sha: Option<String>,
+    pub disabled_paths: Vec<String>,
 }
 
 // --- Budget & Health ---

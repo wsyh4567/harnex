@@ -115,6 +115,22 @@ export type GlobalHookItem = z.infer<typeof GlobalHookItemSchema>;
 export const RiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 
+export const RiskReasonCodeSchema = z.enum([
+  "sandbox_escape",
+  "forbidden_policy",
+  "shell_syntax",
+  "interpreter_execution",
+  "file_deletion",
+  "network_access",
+  "protected_path",
+  "untrusted_source",
+  "hook_untrusted",
+  "high_privilege_proposal",
+  "guardian_escalated",
+  "policy_prompt",
+]);
+export type RiskReasonCode = z.infer<typeof RiskReasonCodeSchema>;
+
 export const ApprovalRequestKindSchema = z.enum([
   "sandbox_escape",
   "shell_command",
@@ -132,6 +148,7 @@ export const ApprovalRequestSchema = z.object({
   detail: z.string(),
   commandOrPath: z.string(),
   riskLevel: RiskLevelSchema,
+  riskReasonCode: RiskReasonCodeSchema.optional(),
   sha256: z.string().optional(),
   previousSha256: z.string().optional(),
   sourceTags: z.array(UntrustedSourceTagSchema).default(["local"]),
@@ -150,6 +167,7 @@ export const GuardianDecisionSchema = z.object({
   threadId: z.string().min(1),
   decision: z.enum(["allow", "escalate", "deny"]),
   riskLevel: RiskLevelSchema,
+  riskReasonCode: RiskReasonCodeSchema.optional(),
   reason: z.string(),
   commandOrPath: z.string(),
   modelId: z.string(),

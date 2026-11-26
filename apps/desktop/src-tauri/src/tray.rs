@@ -11,7 +11,7 @@ use std::{
     fs,
     io::Read,
     ops::Deref,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tauri::{
@@ -296,14 +296,67 @@ fn load_bundle(path: &Path) -> Result<GenomeBundle, String> {
     serde_json::from_slice(&bytes).map_err(message)
 }
 
+fn normalize_picked_path(raw: &str) -> String {
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{stripped}");
+    }
+    if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        return stripped.to_owned();
+    }
+    raw.to_owned()
+}
+
 #[tauri::command]
-fn trust_preview_import(archive_path: String) -> Result<Value, String> {
-    let files: Vec<_> = load_bundle(Path::new(&archive_path))?.into_keys().collect();
-    let executables: Vec<_> = files
-        .iter()
-        .filter(|path| crate::git_store::executable_kind(path).is_some())
-        .collect();
-    Ok(json!({"archivePath": archive_path, "files": files, "untrustedExecutables": executables}))
+async fn pick_workspace_directory(initial_dir: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new().set_title("Select Workspace Folder");
+    if let Some(dir) = initial_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let candidate = if let Some(rest) = dir
+            .strip_prefix("~/")
+            .or_else(|| dir.strip_prefix(r"~\"))
+        {
+            dirs::home_dir().map(|home| home.join(rest))
+        } else if dir == "~" {
+            dirs::home_dir()
+        } else {
+            Some(PathBuf::from(dir))
+        };
+        if let Some(path) = candidate.filter(|p| p.is_dir()) {
+            dialog = dialog.set_directory(path);
+        }
+    }
+    let Some(handle) = dialog.pick_folder().await else {
+        return Ok(None);
+    };
+    let path = handle.path();
+    let utf8 = path
+        .to_str()
+        .ok_or_else(|| "selected folder path is not valid UTF-8".to_owned())?;
+    Ok(Some(normalize_picked_path(utf8)))
+}
+
+#[tauri::command]
+fn git_toggle_organ(
+    path: String,
+    enabled: bool,
+    state: State<'_, Desktop>,
+) -> Result<OrganToggleResult, String> {
+    state.git.toggle_organ(&path, enabled).map_err(message)
+}
+
+#[tauri::command]
+fn trust_preview_import(
+    archive_path: String,
+    state: State<'_, Desktop>,
+) -> Result<ImportPreviewResult, String> {
+    let bundle = load_bundle(Path::new(&archive_path))?;
+    state
+        .git
+        .preview_import(&archive_path, &bundle)
+        .map_err(message)
 }
 
 #[tauri::command]
@@ -430,8 +483,10 @@ pub fn run() {
             git_log,
             git_read_tree,
             git_revert,
+            git_toggle_organ,
             git_scan_export,
             git_confirm_export,
+            pick_workspace_directory,
             trust_preview_import,
             trust_execute_import,
             budget_get_status,

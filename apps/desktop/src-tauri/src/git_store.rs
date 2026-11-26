@@ -11,10 +11,19 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
+pub use crate::protocol::{ImportPreviewResult, OrganToggleResult};
+
 const HEAD: &str = "refs/heads/main";
 const WINDOW: usize = 10;
 const MAX_BUNDLE: usize = 32 * 1024 * 1024;
+pub const DISABLED_ORGANS_PATH: &str = "meta/disabled_organs.json";
 pub type GenomeBundle = BTreeMap<String, String>;
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct DisabledOrgansRegistry {
+    #[serde(default)]
+    disabled: Vec<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum GitStoreError {
@@ -329,6 +338,125 @@ impl GitStore {
                 && !report.findings.iter().any(|finding| &finding.file == name)
         });
         Ok(files)
+    }
+
+    /// Stage an import bundle inside an isolated temporary directory and diff it against HEAD
+    /// without ever mutating the live repository.
+    pub fn preview_import(
+        &self,
+        archive_path: &str,
+        bundle: &GenomeBundle,
+    ) -> Result<ImportPreviewResult, GitStoreError> {
+        validate_files(bundle)?;
+        let stage_dir = tempfile::tempdir()?;
+        for (rel_path, content) in bundle {
+            let safe_rel = validate_relative(rel_path)?;
+            let target = stage_dir.path().join(&safe_rel);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&target, content.as_bytes())?;
+        }
+        let current_tree = self.read_tree(&self.head_sha()?)?;
+        let mut files = Vec::with_capacity(bundle.len());
+        let mut untrusted_executables = Vec::new();
+        let mut added_files = Vec::new();
+        let mut overwritten_files = Vec::new();
+        let mut unchanged_files = Vec::new();
+
+        for (path, content) in bundle {
+            files.push(path.clone());
+            if executable_kind(path).is_some() {
+                untrusted_executables.push(path.clone());
+            }
+            match current_tree.get(path) {
+                None => added_files.push(path.clone()),
+                Some(existing) if existing == content => unchanged_files.push(path.clone()),
+                Some(_) => overwritten_files.push(path.clone()),
+            }
+        }
+
+        Ok(ImportPreviewResult {
+            archive_path: archive_path.to_owned(),
+            files,
+            untrusted_executables,
+            added_files,
+            overwritten_files,
+            unchanged_files,
+        })
+    }
+
+    /// Enable or disable an organ by updating `meta/disabled_organs.json` in a new Git commit.
+    pub fn toggle_organ(
+        &self,
+        organ_path: &str,
+        enabled: bool,
+    ) -> Result<OrganToggleResult, GitStoreError> {
+        let mut normalized = organ_path.trim().replace('\\', "/");
+        while let Some(rest) = normalized.strip_prefix("./") {
+            normalized = rest.to_owned();
+        }
+        if normalized.is_empty() || is_immutable_l0_path(&normalized.to_ascii_lowercase()) {
+            return Err(GitStoreError::Invalid("invalid or immutable organ path".into()));
+        }
+        validate_name(&normalized)?;
+
+        let head_sha = self.head_sha()?;
+        let tree = self.read_tree(&head_sha)?;
+        let mut disabled_set: BTreeSet<String> = match tree.get(DISABLED_ORGANS_PATH) {
+            Some(raw) => {
+                let parsed: DisabledOrgansRegistry = serde_json::from_str(raw)
+                    .map_err(|err| GitStoreError::Invalid(format!("invalid {DISABLED_ORGANS_PATH}: {err}")))?;
+                parsed.disabled.into_iter().collect()
+            }
+            None => BTreeSet::new(),
+        };
+
+        let changed = if enabled {
+            disabled_set.remove(&normalized)
+        } else {
+            disabled_set.insert(normalized.clone())
+        };
+        let disabled_paths: Vec<String> = disabled_set.into_iter().collect();
+
+        if !changed {
+            return Ok(OrganToggleResult {
+                ok: true,
+                new_commit_sha: None,
+                disabled_paths,
+            });
+        }
+
+        let payload = serde_json::to_string_pretty(&DisabledOrgansRegistry {
+            disabled: disabled_paths.clone(),
+        })
+        .map_err(|err| GitStoreError::Invalid(err.to_string()))?;
+
+        let commit_message = if enabled {
+            format!("Enable organ {normalized}")
+        } else {
+            format!("Disable organ {normalized}")
+        };
+        let commit_result = self.commit_patch(
+            &GitCommitPatchParams {
+                base_commit_sha: head_sha,
+                message: commit_message,
+                domain: "organ_toggle".into(),
+                author_name: "Harnex".into(),
+                operations: vec![HarnessPatchOp {
+                    path: DISABLED_ORGANS_PATH.into(),
+                    op: "upsert".into(),
+                    content: Some(format!("{payload}\n")),
+                }],
+            },
+            true,
+        )?;
+
+        Ok(OrganToggleResult {
+            ok: commit_result.ok,
+            new_commit_sha: commit_result.new_commit_sha,
+            disabled_paths,
+        })
     }
 
     /// The bundle is data only. Executable entries are disabled before the new snapshot is published.
@@ -891,5 +1019,128 @@ mod tests {
             .all(|f| f.masked_snippet == "[REDACTED]"));
         assert!(store.export_bundle(&sha, false, false).is_err());
         assert_eq!(store.export_bundle(&sha, false, true).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn toggle_organ_disables_enables_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GitStore::open(dir.path()).unwrap();
+
+        // Reject invalid / traversal / immutable paths.
+        for bad in ["", "   ", "../escape.md", ".git/config", "src-tauri/src/lib.rs"] {
+            assert!(store.toggle_organ(bad, false).is_err(), "expected err for {bad}");
+        }
+
+        // Disable with ./ and Windows separator normalization.
+        let disabled = store.toggle_organ(r".\skills\review.md", false).unwrap();
+        assert!(disabled.ok);
+        let first_sha = disabled.new_commit_sha.expect("first disable should commit");
+        assert_eq!(disabled.disabled_paths, vec!["skills/review.md"]);
+
+        let tree = store.read_tree(&first_sha).unwrap();
+        let raw = tree.get(DISABLED_ORGANS_PATH).expect("disabled registry written");
+        let parsed: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed["disabled"], serde_json::json!(["skills/review.md"]));
+        assert_eq!(store.log(1).unwrap()[0].message, "Disable organ skills/review.md");
+
+        // Idempotent disable produces no new commit.
+        let repeat = store.toggle_organ("skills/review.md", false).unwrap();
+        assert!(repeat.ok);
+        assert!(repeat.new_commit_sha.is_none());
+        assert_eq!(repeat.disabled_paths, vec!["skills/review.md"]);
+        assert_eq!(store.head_sha().unwrap(), first_sha);
+
+        // Enable removes entry and commits.
+        let enabled = store.toggle_organ("./skills/review.md", true).unwrap();
+        assert!(enabled.ok);
+        let second_sha = enabled.new_commit_sha.expect("enable should commit");
+        assert_ne!(second_sha, first_sha);
+        assert!(enabled.disabled_paths.is_empty());
+        assert_eq!(store.log(1).unwrap()[0].message, "Enable organ skills/review.md");
+
+        // Idempotent enable produces no new commit.
+        let repeat_enable = store.toggle_organ("skills/review.md", true).unwrap();
+        assert!(repeat_enable.ok);
+        assert!(repeat_enable.new_commit_sha.is_none());
+        assert!(repeat_enable.disabled_paths.is_empty());
+        assert_eq!(store.head_sha().unwrap(), second_sha);
+    }
+
+    #[test]
+    fn preview_import_stages_in_isolation_and_classifies_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GitStore::open(dir.path()).unwrap();
+        let base = store.head_sha().unwrap();
+        let seeded_sha = store
+            .commit_patch(
+                &GitCommitPatchParams {
+                    base_commit_sha: base,
+                    message: "Seed files".into(),
+                    domain: "test".into(),
+                    author_name: "test".into(),
+                    operations: vec![
+                        HarnessPatchOp {
+                            path: "skills/same.md".into(),
+                            op: "upsert".into(),
+                            content: Some("identical".into()),
+                        },
+                        HarnessPatchOp {
+                            path: "skills/updated.md".into(),
+                            op: "upsert".into(),
+                            content: Some("old version".into()),
+                        },
+                    ],
+                },
+                true,
+            )
+            .unwrap()
+            .new_commit_sha
+            .unwrap();
+
+        let bundle = GenomeBundle::from([
+            ("hooks/guard.ts".into(), "export default {};".into()),
+            ("mcp/servers.json".into(), "{}".into()),
+            ("scripts/build.ts".into(), "console.log(1);".into()),
+            ("skills/new.md".into(), "brand new".into()),
+            ("skills/same.md".into(), "identical".into()),
+            ("skills/updated.md".into(), "new version".into()),
+        ]);
+
+        let preview = store.preview_import("/tmp/genome.json", &bundle).unwrap();
+        assert_eq!(preview.archive_path, "/tmp/genome.json");
+        assert_eq!(
+            preview.files,
+            vec![
+                "hooks/guard.ts",
+                "mcp/servers.json",
+                "scripts/build.ts",
+                "skills/new.md",
+                "skills/same.md",
+                "skills/updated.md",
+            ]
+        );
+        assert_eq!(
+            preview.untrusted_executables,
+            vec!["hooks/guard.ts", "mcp/servers.json", "scripts/build.ts"]
+        );
+        assert_eq!(
+            preview.added_files,
+            vec![
+                "hooks/guard.ts",
+                "mcp/servers.json",
+                "scripts/build.ts",
+                "skills/new.md",
+            ]
+        );
+        assert_eq!(preview.overwritten_files, vec!["skills/updated.md"]);
+        assert_eq!(preview.unchanged_files, vec!["skills/same.md"]);
+
+        // Live repo must remain completely untouched.
+        assert_eq!(store.head_sha().unwrap(), seeded_sha);
+        assert_eq!(store.read_tree(&seeded_sha).unwrap().len(), 2);
+
+        // Invalid paths must be rejected.
+        let invalid_bundle = GenomeBundle::from([("../escape.md".into(), "bad".into())]);
+        assert!(store.preview_import("/tmp/bad.json", &invalid_bundle).is_err());
     }
 }
