@@ -128,12 +128,14 @@ export interface ToastNotice {
   tone: "info" | "success" | "warning" | "error";
   title: string;
   detail?: string;
+  durationMs?: number;
 }
 
 export interface CommandDeckState {
   ipc: HarnexIpcClient;
   initialized: boolean;
   loading: boolean;
+  initError: string | null;
 
   // Navigation & UI
   theme: ThemeMode;
@@ -142,6 +144,7 @@ export interface CommandDeckState {
   sidebarCollapsed: boolean;
   inspectorOpen: boolean;
   activeWorkspace: string;
+  customWorkspaces: string[];
   rightTab: RightWorkbenchTab;
   sideChatOpen: boolean;
   sideChatLoading: boolean;
@@ -233,6 +236,8 @@ export interface CommandDeckState {
   ) => Promise<void>;
   startNewTaskPrompt: (prompt: string, mode?: ExecutionMode, binding?: SlotBinding) => Promise<void>;
   setActiveWorkspace: (workspace: string) => void;
+  addCustomWorkspace: (workspace: string) => void;
+  removeCustomWorkspace: (workspace: string) => void;
   setActiveThread: (threadId: string) => Promise<void>;
   renameThread: (threadId: string, title: string) => Promise<void>;
   deleteThread: (threadId: string) => Promise<void>;
@@ -351,6 +356,43 @@ function upsertToolCall(toolCalls: ToolCallRecord[], incoming: ToolCallRecord): 
 
 export const COMPOSER_DRAFTS_KEY = "harnex:composer-drafts:v1";
 const MAX_COMPOSER_DRAFTS = 20;
+export const CUSTOM_WORKSPACES_KEY = "harnex:workspaces:v1";
+const MAX_CUSTOM_WORKSPACES = 24;
+
+function normalizeWorkspaceList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out.slice(0, MAX_CUSTOM_WORKSPACES);
+}
+
+export function loadCustomWorkspaces(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(CUSTOM_WORKSPACES_KEY);
+    if (!raw) return [];
+    return normalizeWorkspaceList(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomWorkspaces(workspaces: string[]): void {
+  try {
+    globalThis.localStorage?.setItem(
+      CUSTOM_WORKSPACES_KEY,
+      JSON.stringify(normalizeWorkspaceList(workspaces)),
+    );
+  } catch {
+    // Ignore storage quota or SSR/test unavailability
+  }
+}
 
 function normalizeComposerDrafts(raw: Record<string, string>): Record<string, string> {
   const entries = Object.entries(raw).filter(
@@ -395,6 +437,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   ipc: createIpcClient(),
   initialized: false,
   loading: false,
+  initError: null,
 
   theme: getInitialTheme(),
   locale: getInitialLocale(),
@@ -402,6 +445,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   sidebarCollapsed: false,
   inspectorOpen: false,
   activeWorkspace: "~/Work",
+  customWorkspaces: loadCustomWorkspaces(),
   rightTab: "triage",
   sideChatOpen: false,
   sideChatLoading: false,
@@ -480,123 +524,145 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     setStoredLocale(initialLocale);
     const ipc = client ?? get().ipc;
 
-    set({ ipc, loading: true, theme: initialTheme, locale: initialLocale });
+    set({ ipc, loading: true, initError: null, theme: initialTheme, locale: initialLocale });
 
-    const [
-      systemHealth,
-      appConfig,
-      budgetStatus,
-      onboardingReplay,
-      threads,
-      pendingApprovals,
-      execPolicyRules,
-      trustRecords,
-      globalHooks,
-      guardianDecisions,
-      proposals,
-      silentArchiveCount,
-      commits,
-      providers,
-      aggregatedCatalog,
-    ] = await Promise.all([
-      ipc.getSystemHealth(),
-      ipc.getAppConfig(),
-      ipc.getBudgetStatus(),
-      ipc.getOnboardingReplay(),
-      ipc.listThreads(),
-      ipc.listPendingApprovals(),
-      ipc.listExecPolicyRules(),
-      ipc.listTrustRecords(),
-      ipc.listHooks(),
-      ipc.listGuardianDecisions(),
-      ipc.listProposals(),
-      ipc.getSilentArchiveCount(),
-      ipc.listCommits(),
-      ipc.listProviders(),
-      ipc.getAggregatedCatalog(),
-    ]);
-    if (myGen !== initGeneration) return;
+    try {
+      const [
+        systemHealth,
+        appConfig,
+        budgetStatus,
+        onboardingReplay,
+        threads,
+        pendingApprovals,
+        execPolicyRules,
+        trustRecords,
+        globalHooks,
+        guardianDecisions,
+        proposals,
+        silentArchiveCount,
+        commits,
+        providers,
+        aggregatedCatalog,
+      ] = await Promise.all([
+        ipc.getSystemHealth(),
+        ipc.getAppConfig(),
+        ipc.getBudgetStatus().catch(() => null),
+        ipc.getOnboardingReplay().catch(() => null),
+        ipc.listThreads(),
+        ipc.listPendingApprovals().catch(() => []),
+        ipc.listExecPolicyRules().catch(() => []),
+        ipc.listTrustRecords().catch(() => []),
+        ipc.listHooks().catch(() => []),
+        ipc.listGuardianDecisions().catch(() => []),
+        ipc.listProposals().catch(() => []),
+        ipc.getSilentArchiveCount().catch(() => 0),
+        ipc.listCommits().catch(() => []),
+        ipc.listProviders().catch(() => []),
+        ipc.getAggregatedCatalog().catch(() => []),
+      ]);
+      if (myGen !== initGeneration) return;
 
-    const activeThread = threads[0] ?? null;
-    const activeThreadId = activeThread?.id ?? null;
-    const activeWorkspace = activeThread?.workspacePath ?? appConfig.defaultWorkspace ?? "~/Work";
+      const activeThread = threads[0] ?? null;
+      const activeThreadId = activeThread?.id ?? null;
+      const savedWorkspaces = loadCustomWorkspaces();
+      const activeWorkspace =
+        activeThread?.workspacePath ??
+        appConfig.defaultWorkspace ??
+        savedWorkspaces[0] ??
+        "~/Work";
 
-    const initialMessages: Record<string, ChatMessage[]> = {};
-    await Promise.all(
-      threads.map(async (t) => {
-        initialMessages[t.id] = dedupeMessagesById(await ipc.getThreadMessages(t.id));
-      }),
-    );
-    if (myGen !== initGeneration) return;
+      const initialMessages: Record<string, ChatMessage[]> = {};
+      await Promise.all(
+        threads.map(async (t) => {
+          initialMessages[t.id] = dedupeMessagesById(
+            await ipc.getThreadMessages(t.id).catch(() => []),
+          );
+        }),
+      );
+      if (myGen !== initGeneration) return;
 
-    const headSha = commits[0]?.sha ?? systemHealth.activeCommitSha;
-    const [genomeFiles, refreshedHealth] = await Promise.all([
-      headSha ? ipc.readGenomeTree(headSha) : Promise.resolve([]),
-      systemHealth.sidecarAlive
-        ? Promise.resolve(systemHealth)
-        : ipc.getSystemHealth().catch(() => systemHealth),
-    ]);
-    if (myGen !== initGeneration) return;
-    const latestSystemHealth = refreshedHealth;
-    const firstReadyProposal = proposals.find((p) => p.status === "ready") ?? proposals[0] ?? null;
+      const headSha = commits[0]?.sha ?? systemHealth.activeCommitSha;
+      const [genomeFiles, refreshedHealth] = await Promise.all([
+        headSha ? ipc.readGenomeTree(headSha).catch(() => []) : Promise.resolve([]),
+        systemHealth.sidecarAlive
+          ? Promise.resolve(systemHealth)
+          : ipc.getSystemHealth().catch(() => systemHealth),
+      ]);
+      if (myGen !== initGeneration) return;
+      const latestSystemHealth = refreshedHealth;
+      const firstReadyProposal = proposals.find((p) => p.status === "ready") ?? proposals[0] ?? null;
 
-    clearActiveSubscription();
-    activeUnsubscribe = ipc.subscribe((ev) => {
-      get().handleIpcEvent(ev);
-    });
+      clearActiveSubscription();
+      activeUnsubscribe = ipc.subscribe((ev) => {
+        get().handleIpcEvent(ev);
+      });
 
-    set({
-      initialized: true,
-      loading: false,
-      systemHealth: latestSystemHealth,
-      appConfig,
-      budgetStatus,
-      onboardingReplay,
-      threads,
-      activeThreadId,
-      activeWorkspace,
-      messagesByThread: initialMessages,
-      pendingApprovals,
-      execPolicyRules,
-      trustRecords,
-      globalHooks,
-      guardianDecisions,
-      proposals,
-      selectedProposalId: firstReadyProposal?.id ?? null,
-      silentArchiveCount,
-      commits,
-      selectedCommitSha: headSha,
-      genomeFiles,
-      providers,
-      aggregatedCatalog,
-      composerDrafts: loadComposerDrafts(),
-    });
+      set({
+        initialized: true,
+        loading: false,
+        initError: null,
+        systemHealth: latestSystemHealth,
+        appConfig,
+        budgetStatus,
+        onboardingReplay,
+        threads,
+        activeThreadId,
+        activeWorkspace,
+        customWorkspaces: savedWorkspaces,
+        messagesByThread: initialMessages,
+        pendingApprovals,
+        execPolicyRules,
+        trustRecords,
+        globalHooks,
+        guardianDecisions,
+        proposals,
+        selectedProposalId: firstReadyProposal?.id ?? null,
+        silentArchiveCount,
+        commits,
+        selectedCommitSha: headSha,
+        genomeFiles,
+        providers,
+        aggregatedCatalog,
+        composerDrafts: loadComposerDrafts(),
+      });
 
-    if (!latestSystemHealth.sidecarAlive) {
-      for (const delayMs of [1500, 4000]) {
-        setTimeout(() => {
-          if (myGen !== initGeneration || get().systemHealth?.sidecarAlive) return;
-          void ipc
-            .getSystemHealth()
-            .then((nextHealth) => {
-              if (myGen === initGeneration) {
-                set({ systemHealth: nextHealth });
-              }
-            })
-            .catch(() => {});
-        }, delayMs);
+      if (!latestSystemHealth.sidecarAlive) {
+        for (const delayMs of [1500, 4000]) {
+          setTimeout(() => {
+            if (myGen !== initGeneration || get().systemHealth?.sidecarAlive) return;
+            void ipc
+              .getSystemHealth()
+              .then((nextHealth) => {
+                if (myGen === initGeneration) {
+                  set({ systemHealth: nextHealth });
+                }
+              })
+              .catch(() => {});
+          }, delayMs);
+        }
       }
-    }
 
-    // Quietly check for updates, compatibility & gardener hygiene on startup without blocking initial deck render
-    void get().checkForUpdates();
-    void get().checkHarnessCompatibility();
-    void get().refreshGardenerReport();
+      // Quietly check for updates, compatibility & gardener hygiene on startup without blocking initial deck render
+      void get().checkForUpdates();
+      void get().checkHarnessCompatibility();
+      void get().refreshGardenerReport();
+    } catch (error) {
+      if (myGen !== initGeneration) return;
+      const message = error instanceof Error ? error.message : String(error);
+      set({
+        loading: false,
+        initError: message || "Failed to connect to Harnex L0 Runtime",
+      });
+    }
   },
 
   pushToast: (toast) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    set((s) => ({ toasts: [...s.toasts.slice(-3), { ...toast, id }] }));
+    const defaultDuration =
+      toast.tone === "error" ? 7500 : toast.tone === "warning" ? 5500 : 4000;
+    set((s) => ({
+      toasts: [...s.toasts.slice(-3), { ...toast, durationMs: toast.durationMs ?? defaultDuration, id }],
+    }));
   },
 
   dismissToast: (id) => {
@@ -715,10 +781,43 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   },
 
   setActiveWorkspace: (workspace) => {
-    const firstInWorkspace = get().threads.find((t) => t.workspacePath === workspace);
+    const trimmed = workspace.trim();
+    if (!trimmed) return;
+    const firstInWorkspace = get().threads.find((t) => t.workspacePath === trimmed);
     set({
-      activeWorkspace: workspace,
+      activeWorkspace: trimmed,
       activeThreadId: firstInWorkspace?.id ?? get().activeThreadId,
+    });
+  },
+
+  addCustomWorkspace: (workspace) => {
+    const trimmed = workspace.trim();
+    if (!trimmed) return;
+    const next = normalizeWorkspaceList([trimmed, ...get().customWorkspaces]);
+    saveCustomWorkspaces(next);
+    const firstInWorkspace = get().threads.find((t) => t.workspacePath === trimmed);
+    set({
+      customWorkspaces: next,
+      activeWorkspace: trimmed,
+      activeThreadId: firstInWorkspace?.id ?? get().activeThreadId,
+    });
+    void get()
+      .ipc.updateAppConfig({ defaultWorkspace: trimmed })
+      .then((appConfig) => set({ appConfig }))
+      .catch(() => {});
+  },
+
+  removeCustomWorkspace: (workspace) => {
+    const next = get().customWorkspaces.filter((w) => w !== workspace);
+    saveCustomWorkspaces(next);
+    const current = get().activeWorkspace;
+    const fallback =
+      current === workspace
+        ? (next[0] ?? get().threads[0]?.workspacePath ?? "~/Work")
+        : current;
+    set({
+      customWorkspaces: next,
+      activeWorkspace: fallback,
     });
   },
 
@@ -822,9 +921,18 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   createThread: async (title, mode = "craft") => {
     const workspacePath = get().activeWorkspace;
     const thread = await get().ipc.createThread({ workspacePath, title, mode });
+    const nextCustom =
+      thread.workspacePath && thread.workspacePath !== workspacePath
+        ? normalizeWorkspaceList([thread.workspacePath, ...get().customWorkspaces])
+        : get().customWorkspaces;
+    if (thread.workspacePath && thread.workspacePath !== workspacePath) {
+      saveCustomWorkspaces(nextCustom);
+    }
     set((s) => ({
       threads: [thread, ...s.threads],
       activeThreadId: thread.id,
+      activeWorkspace: thread.workspacePath || s.activeWorkspace,
+      customWorkspaces: nextCustom,
       activePage: "thread",
       messagesByThread: { ...s.messagesByThread, [thread.id]: [] },
     }));
@@ -835,11 +943,21 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     const trimmed = prompt.trim();
     if (!trimmed) return;
     const cleanTitle = trimmed.replace(/\s+/g, " ").slice(0, 36);
-    const thread = await get().createThread(cleanTitle, mode);
-    if (binding) {
-      get().setThreadModelOverride(thread.id, binding);
+    try {
+      const thread = await get().createThread(cleanTitle, mode);
+      if (binding) {
+        get().setThreadModelOverride(thread.id, binding);
+      }
+      await get().sendPrompt(trimmed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().setComposerDraft("home", trimmed);
+      get().pushToast({
+        tone: "error",
+        title: translate(get().locale, "toast.startTaskFailed"),
+        detail: message,
+      });
     }
-    await get().sendPrompt(trimmed);
   },
 
   setThreadMode: (threadId, mode) => {
@@ -887,28 +1005,39 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   sendPrompt: async (prompt) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
-    let threadId = get().activeThreadId;
-    if (!threadId) {
-      const created = await get().createThread("New Command Thread");
-      threadId = created.id;
-    }
-    const thread = get().threads.find((t) => t.id === threadId);
-    const override = get().selectedModelByThread[threadId];
-    const solverSlot = get().appConfig?.slots.solver;
-    const activeBinding = override ?? solverSlot;
+    try {
+      let threadId = get().activeThreadId;
+      if (!threadId) {
+        const created = await get().createThread("New Command Thread");
+        threadId = created.id;
+      }
+      const thread = get().threads.find((t) => t.id === threadId);
+      const override = get().selectedModelByThread[threadId];
+      const solverSlot = get().appConfig?.slots.solver;
+      const activeBinding = override ?? solverSlot;
 
-    await get().ipc.startRun({
-      threadId,
-      prompt: trimmed,
-      mode: thread?.mode ?? "craft",
-      providerIdOverride: activeBinding?.providerId,
-      modelOverride: activeBinding?.modelId,
-    });
-    const msgs = dedupeMessagesById(await get().ipc.getThreadMessages(threadId));
-    set((s) => ({
-      activePage: "thread",
-      messagesByThread: { ...s.messagesByThread, [threadId]: msgs },
-    }));
+      await get().ipc.startRun({
+        threadId,
+        prompt: trimmed,
+        mode: thread?.mode ?? "craft",
+        providerIdOverride: activeBinding?.providerId,
+        modelOverride: activeBinding?.modelId,
+      });
+      const msgs = dedupeMessagesById(await get().ipc.getThreadMessages(threadId));
+      set((s) => ({
+        activePage: "thread",
+        messagesByThread: { ...s.messagesByThread, [threadId]: msgs },
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const draftKey = get().activeThreadId ?? "home";
+      get().setComposerDraft(draftKey, trimmed);
+      get().pushToast({
+        tone: "error",
+        title: translate(get().locale, "toast.startTaskFailed"),
+        detail: message,
+      });
+    }
   },
 
   pauseActiveRun: async () => {
@@ -963,6 +1092,13 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
           [threadId]: [...(s.sideChatByThread[threadId] ?? []), turn],
         },
       }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().pushToast({
+        tone: "error",
+        title: translate(get().locale, "toast.sideChatFailed"),
+        detail: message,
+      });
     } finally {
       set({ sideChatLoading: false });
     }
@@ -1383,6 +1519,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         id: prov.id,
         name: prov.name,
         kind: prov.kind,
+        apiProtocol: prov.apiProtocol,
         baseUrl: prov.baseUrl,
         models: prov.models,
         pinnedModels: nextPins,
@@ -1605,15 +1742,15 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       });
       get().pushToast({
         tone: "success",
-        title: "Harness² 迁移提案已生成",
-        detail: "请在 Triage 分诊箱审查 Diff 并点击 Adopt & Trust 完成升级修复。",
+        title: translate(get().locale, "toast.migrationReadyTitle"),
+        detail: translate(get().locale, "toast.migrationReadyDetail"),
       });
       return proposal;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       get().pushToast({
         tone: "error",
-        title: "Harness² 自动迁移失败",
+        title: translate(get().locale, "toast.migrationFailedTitle"),
         detail: message,
       });
       return null;

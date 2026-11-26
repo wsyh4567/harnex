@@ -21,7 +21,14 @@ import {
   formatUnpricedSummary,
   resolveCostSourceBadge,
 } from "../features/providers/providerPresets.ts";
-import { cn, formatTokens, formatUsd, shortSha } from "../lib/utils.ts";
+import {
+  cn,
+  formatTokens,
+  formatUsd,
+  resolveCommitSha,
+  resolveCommitVersionLabel,
+  shortSha,
+} from "../lib/utils.ts";
 import { useCommandDeckStore, type ActivePage } from "../stores/useCommandDeckStore.ts";
 
 export function TopBar() {
@@ -35,6 +42,7 @@ export function TopBar() {
     toggleSidebar,
     threads,
     activeThreadId,
+    commits,
     appConfig,
     setRsiMode,
     budgetStatus,
@@ -72,10 +80,17 @@ export function TopBar() {
     settings: t("nav.settings"),
   };
 
-  const headVersion = activeThread?.pinnedVersionLabel ?? "v7";
-  const headSha = shortSha(
-    activeThread?.pinnedCommitSha ?? systemHealth?.activeCommitSha ?? "a7f3c91",
+  const resolvedSha = resolveCommitSha(
+    commits,
+    activeThread?.pinnedCommitSha,
+    systemHealth?.activeCommitSha,
   );
+  const headVersion = resolveCommitVersionLabel(
+    commits,
+    resolvedSha,
+    activeThread?.pinnedVersionLabel,
+  );
+  const headSha = shortSha(resolvedSha);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-[var(--hx-border)] bg-[var(--hx-canvas)] px-4 text-xs">

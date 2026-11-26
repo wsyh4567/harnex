@@ -202,9 +202,37 @@ impl L0Runtime {
         method: &str,
         mut params: Value,
     ) -> Result<Value, JsonRpcError> {
+        if method == "runner.start" {
+            let thread_id = required(&params, "threadId")?.to_owned();
+            if !self.core.has_workspace(&thread_id) {
+                self.rebind_persisted_thread(&thread_id).await?;
+            }
+        }
+
+        let deleted_thread_id = if method == "thread.delete" {
+            params
+                .get("threadId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        } else {
+            None
+        };
+
         let workspace = if matches!(method, "thread.create" | "onboarding.start_live_challenge") {
             let root = if method == "thread.create" {
-                Some(required(&params, "workspacePath")?.to_owned())
+                let raw = required(&params, "workspacePath")?;
+                let resolved = resolve_workspace_path(raw)
+                    .map_err(|e| rpc_error(rpc_error_code::SANDBOX_DENIED, e.to_string()))?;
+                params
+                    .as_object_mut()
+                    .ok_or_else(|| {
+                        rpc_error(
+                            rpc_error_code::INVALID_PARAMS,
+                            "parameters must be an object",
+                        )
+                    })?
+                    .insert("workspacePath".into(), json!(resolved));
+                Some(resolved)
             } else {
                 None
             };
@@ -254,10 +282,59 @@ impl L0Runtime {
             }
             answer["pinnedCommitSha"] = json!(sha);
         }
+        if let Some(thread_id) = deleted_thread_id {
+            self.core.clear_workspace(&thread_id);
+        }
         if let Some(mode) = mode {
             self.core.set_mode(mode);
         }
         Ok(answer)
+    }
+
+    async fn rebind_persisted_thread(&self, thread_id: &str) -> Result<(), JsonRpcError> {
+        let threads = self.sidecar.call("thread.list", json!({})).await?;
+        let Some(entry) = threads.as_array().and_then(|list| {
+            list.iter()
+                .find(|item| item.get("id").and_then(Value::as_str) == Some(thread_id))
+        }) else {
+            return Ok(());
+        };
+        let raw_workspace = entry
+            .get("workspacePath")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                rpc_error(
+                    rpc_error_code::SANDBOX_DENIED,
+                    "persisted thread is missing workspacePath",
+                )
+            })?;
+        let resolved = resolve_workspace_path(raw_workspace)
+            .map_err(|e| rpc_error(rpc_error_code::SANDBOX_DENIED, e.to_string()))?;
+        let sha = entry
+            .get("pinnedCommitSha")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned);
+        let genome = match sha {
+            Some(ref commit_sha) => self
+                .git
+                .read_tree(commit_sha)
+                .or_else(|_| self.git.head_sha().and_then(|head| self.git.read_tree(&head)))
+                .map_err(internal)?,
+            None => {
+                let head = self.git.head_sha().map_err(internal)?;
+                self.git.read_tree(&head).map_err(internal)?
+            }
+        };
+        self.core
+            .bind_workspace(
+                thread_id,
+                resolved,
+                SandboxMode::WorkspaceWrite,
+                Some(Arc::new(genome)),
+            )
+            .map_err(|e| rpc_error(rpc_error_code::SANDBOX_DENIED, e.to_string()))
     }
 
     pub fn system_health(&self) -> Result<SystemHealth, String> {
@@ -309,6 +386,68 @@ impl L0Runtime {
         }));
         Ok(())
     }
+}
+
+pub fn resolve_workspace_path(raw: &str) -> io::Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "workspace path cannot be empty",
+        ));
+    }
+    let (candidate, auto_create) = if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix(r"~\"))
+    {
+        let home = dirs::home_dir()
+            .ok_or_else(|| io::Error::other("home directory unavailable"))?;
+        let cleaned = rest.trim_matches(['/', '\\']);
+        if cleaned.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "workspace must be a dedicated subdirectory, not the home directory root",
+            ));
+        }
+        let allow_auto_create = matches!(cleaned, "Work" | "HarnexWork");
+        (home.join(cleaned), allow_auto_create)
+    } else if trimmed == "~" {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "workspace must be a dedicated subdirectory, not the home directory root",
+        ));
+    } else {
+        (PathBuf::from(trimmed), false)
+    };
+
+    if auto_create && !candidate.exists() {
+        std::fs::create_dir_all(&candidate)?;
+    }
+    if !candidate.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "workspace directory does not exist: {}",
+                candidate.display()
+            ),
+        ));
+    }
+    let canonical = candidate.canonicalize()?;
+    Ok(strip_windows_verbatim_prefix(&canonical))
+}
+
+fn strip_windows_verbatim_prefix(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{stripped}");
+        }
+        if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+            return stripped.to_owned();
+        }
+    }
+    raw.into_owned()
 }
 
 pub(crate) fn internal(error: impl std::fmt::Display) -> JsonRpcError {
@@ -535,4 +674,26 @@ pub fn l0_handler(
             }
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_workspace_path_rejects_empty_and_home_root() {
+        assert!(resolve_workspace_path("").is_err());
+        assert!(resolve_workspace_path("   ").is_err());
+        assert!(resolve_workspace_path("~").is_err());
+        assert!(resolve_workspace_path("~/").is_err());
+    }
+
+    #[test]
+    fn resolve_workspace_path_canonicalizes_existing_dir_without_verbatim_prefix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let resolved = resolve_workspace_path(&dir.path().to_string_lossy()).expect("resolve");
+        assert!(!resolved.is_empty());
+        assert!(!resolved.starts_with(r"\\?\"));
+        assert!(Path::new(&resolved).is_dir());
+    }
 }

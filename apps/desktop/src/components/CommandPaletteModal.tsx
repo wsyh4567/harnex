@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { EvolutionProposal, Thread } from "@harnex/protocol";
+import type { EvolutionProposal, GenomeCommit, Thread } from "@harnex/protocol";
 import {
   FlaskConical,
   GitCommitHorizontal,
@@ -13,9 +13,10 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { useAnimatedPresence } from "../hooks/useAnimatedPresence.ts";
 import { localizeProposal, localizeThreadTitle } from "../i18n/demoContent.ts";
 import { translate, useI18n, type Locale, type TranslationKey } from "../i18n/index.ts";
-import { cn, shortSha } from "../lib/utils.ts";
+import { cn, resolveCommitVersionLabel, shortSha } from "../lib/utils.ts";
 import { useCommandDeckStore, type ActivePage } from "../stores/useCommandDeckStore.ts";
 
 export type PaletteCategory = "pages" | "threads" | "proposals" | "actions";
@@ -50,8 +51,9 @@ export function buildPaletteItems(params: {
   locale: Locale;
   threads: Thread[];
   proposals: EvolutionProposal[];
+  commits?: GenomeCommit[];
 }): PaletteItem[] {
-  const { locale, threads, proposals } = params;
+  const { locale, threads, proposals, commits = [] } = params;
   const t = (key: TranslationKey, vars?: Record<string, string | number>) =>
     translate(locale, key, vars);
 
@@ -81,7 +83,7 @@ export function buildPaletteItems(params: {
       id: `thread-${th.id}`,
       category: "threads",
       label: title,
-      subtitle: `${th.workspacePath} · ${th.pinnedVersionLabel ?? "v7"} · ${shortSha(th.pinnedCommitSha)}`,
+      subtitle: `${th.workspacePath} · ${resolveCommitVersionLabel(commits, th.pinnedCommitSha, th.pinnedVersionLabel)} · ${shortSha(th.pinnedCommitSha)}`,
       keywords: `${title} ${th.title} ${th.workspacePath} ${th.domain}`,
       payload: { type: "thread", threadId: th.id },
     };
@@ -248,6 +250,7 @@ export function CommandPaletteModal() {
     toggleCommandPalette,
     threads,
     activeThreadId,
+    commits,
     proposals,
     setActivePage,
     setActiveThread,
@@ -268,10 +271,11 @@ export function CommandPaletteModal() {
   const [isComposing, setIsComposing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const presence = useAnimatedPresence(commandPaletteOpen, 145);
 
   const allItems = useMemo(
-    () => buildPaletteItems({ locale, threads, proposals }),
-    [locale, threads, proposals],
+    () => buildPaletteItems({ locale, threads, proposals, commits }),
+    [locale, threads, proposals, commits],
   );
   const filtered = useMemo(() => filterPaletteItems(allItems, query), [allItems, query]);
 
@@ -295,7 +299,7 @@ export function CommandPaletteModal() {
     activeEl?.scrollIntoView({ block: "nearest" });
   }, [commandPaletteOpen, highlightIdx]);
 
-  if (!commandPaletteOpen) return null;
+  if (!presence.rendered) return null;
 
   const activeThread = threads.find((th) => th.id === activeThreadId) ?? threads[0] ?? null;
 
@@ -352,14 +356,16 @@ export function CommandPaletteModal() {
   return (
     <div
       data-testid="command-palette-backdrop"
+      data-state={presence.closing ? "closing" : "open"}
       onClick={() => toggleCommandPalette(false)}
-      className="fixed inset-0 z-50 flex items-start justify-center bg-slate-950/35 px-4 pt-[14vh] backdrop-blur-[2px]"
+      className="hx-backdrop fixed inset-0 z-50 flex items-start justify-center bg-slate-950/35 px-4 pt-[14vh] backdrop-blur-[2px]"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={t("cmdPalette.trigger")}
         data-testid="command-palette-modal"
+        data-state={presence.closing ? "closing" : "open"}
         onClick={(e) => e.stopPropagation()}
         style={{ boxShadow: "var(--hx-shadow-popover)" }}
         className="hx-modal flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)]"

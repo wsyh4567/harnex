@@ -264,6 +264,9 @@ pub struct App {
     pub approvals: VecDeque<ApprovalRequest>,
     pub input: String,
     pub cursor_char: usize,
+    pub input_history: Vec<String>,
+    pub history_cursor: Option<usize>,
+    pub draft_before_history: String,
     pub scroll_from_bottom: u16,
     pub reasoning_expanded: bool,
     pub tools_expanded: bool,
@@ -295,6 +298,9 @@ impl App {
             approvals: VecDeque::new(),
             input: String::new(),
             cursor_char: 0,
+            input_history: Vec::new(),
+            history_cursor: None,
+            draft_before_history: String::new(),
             scroll_from_bottom: 0,
             reasoning_expanded: true,
             tools_expanded: false,
@@ -422,9 +428,75 @@ impl App {
         }
     }
 
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.cursor_char = 0;
+        self.history_cursor = None;
+    }
+
+    pub fn delete_prev_word(&mut self) {
+        if self.cursor_char == 0 {
+            return;
+        }
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut start = self.cursor_char;
+        while start > 0 && chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        while start > 0 && !chars[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        let start_byte = char_to_byte_idx(&self.input, start);
+        let end_byte = char_to_byte_idx(&self.input, self.cursor_char);
+        self.input.replace_range(start_byte..end_byte, "");
+        self.cursor_char = start;
+    }
+
+    pub fn history_prev(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+        let next_idx = match self.history_cursor {
+            None => {
+                self.draft_before_history = self.input.clone();
+                self.input_history.len() - 1
+            }
+            Some(0) => 0,
+            Some(idx) => idx - 1,
+        };
+        self.history_cursor = Some(next_idx);
+        self.input = self.input_history[next_idx].clone();
+        self.cursor_char = self.input.chars().count();
+    }
+
+    pub fn history_next(&mut self) {
+        let Some(idx) = self.history_cursor else {
+            return;
+        };
+        if idx + 1 >= self.input_history.len() {
+            self.history_cursor = None;
+            self.input = std::mem::take(&mut self.draft_before_history);
+        } else {
+            let next_idx = idx + 1;
+            self.history_cursor = Some(next_idx);
+            self.input = self.input_history[next_idx].clone();
+        }
+        self.cursor_char = self.input.chars().count();
+    }
+
     pub fn take_input(&mut self) -> String {
         self.cursor_char = 0;
-        std::mem::take(&mut self.input)
+        self.history_cursor = None;
+        self.draft_before_history.clear();
+        let taken = std::mem::take(&mut self.input);
+        let trimmed = taken.trim();
+        if !trimmed.is_empty() && self.input_history.last().map(String::as_str) != Some(trimmed) {
+            self.input_history.push(trimmed.to_owned());
+            if self.input_history.len() > 100 {
+                self.input_history.remove(0);
+            }
+        }
+        taken
     }
 
     pub fn load_messages(&mut self, messages: &[Value]) {
@@ -923,5 +995,36 @@ mod tests {
         app.backspace();
         app.insert_char('5');
         assert_eq!(app.input, "分析汽油95#");
+    }
+
+    #[test]
+    fn input_history_and_word_clear_shortcuts_work_cleanly() {
+        let mut app = App::new(&sample_opts());
+        app.input = "first prompt".into();
+        app.cursor_char = app.input.chars().count();
+        assert_eq!(app.take_input(), "first prompt");
+
+        app.input = "second prompt".into();
+        app.cursor_char = app.input.chars().count();
+        assert_eq!(app.take_input(), "second prompt");
+
+        app.input = "draft".into();
+        app.cursor_char = app.input.chars().count();
+        app.history_prev();
+        assert_eq!(app.input, "second prompt");
+        app.history_prev();
+        assert_eq!(app.input, "first prompt");
+        app.history_next();
+        assert_eq!(app.input, "second prompt");
+        app.history_next();
+        assert_eq!(app.input, "draft");
+
+        app.input = "hello world  ".into();
+        app.cursor_char = app.input.chars().count();
+        app.delete_prev_word();
+        assert_eq!(app.input, "hello ");
+        app.clear_input();
+        assert!(app.input.is_empty());
+        assert_eq!(app.cursor_char, 0);
     }
 }

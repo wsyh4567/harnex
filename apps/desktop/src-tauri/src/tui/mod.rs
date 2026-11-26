@@ -45,6 +45,7 @@ enum BgMessage {
     ThreadReady {
         id: String,
         title: String,
+        workspace_path: Option<String>,
         pinned_sha: String,
         messages: Vec<Value>,
         pending_prompt: Option<String>,
@@ -305,12 +306,16 @@ fn handle_bg_message(
         BgMessage::ThreadReady {
             id,
             title,
+            workspace_path,
             pinned_sha,
             messages,
             pending_prompt,
         } => {
             app.active_thread_id = Some(id.clone());
             app.active_thread_title = Some(title);
+            if let Some(ws) = workspace_path.filter(|s| !s.is_empty()) {
+                app.workspace = ws;
+            }
             if !pinned_sha.is_empty() {
                 app.pinned_sha = pinned_sha.chars().take(7).collect();
             }
@@ -390,6 +395,8 @@ fn handle_term_event(
                         app.turns.clear();
                         app.scroll_from_bottom = 0;
                     }
+                    KeyCode::Char('u') => app.clear_input(),
+                    KeyCode::Char('w') => app.delete_prev_word(),
                     _ => {}
                 }
                 return;
@@ -407,6 +414,8 @@ fn handle_term_event(
                 KeyCode::PageDown => {
                     app.scroll_from_bottom = app.scroll_from_bottom.saturating_sub(8);
                 }
+                KeyCode::Up => app.history_prev(),
+                KeyCode::Down => app.history_next(),
                 KeyCode::Left => app.move_cursor_left(),
                 KeyCode::Right => app.move_cursor_right(),
                 KeyCode::Home => app.cursor_char = 0,
@@ -502,6 +511,7 @@ fn handle_slash(
                         let _ = tx.send(BgMessage::ThreadReady {
                             id: thread.id,
                             title: thread.title,
+                            workspace_path: Some(thread.workspace_path),
                             pinned_sha: thread.pinned_sha,
                             messages: msgs,
                             pending_prompt: None,
@@ -678,9 +688,14 @@ fn submit_prompt(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_owned();
+                let workspace_path = thread
+                    .get("workspacePath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 let _ = tx.send(BgMessage::ThreadReady {
                     id,
                     title,
+                    workspace_path,
                     pinned_sha: pinned,
                     messages: Vec::new(),
                     pending_prompt: Some(prompt),

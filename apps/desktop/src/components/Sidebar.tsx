@@ -1,7 +1,9 @@
 import { useState } from "react";
 import {
+  Check,
   Cpu,
   FlaskConical,
+  FolderPlus,
   GitCommitHorizontal,
   KeyRound,
   LayoutDashboard,
@@ -13,11 +15,12 @@ import {
   ShieldAlert,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 import { ChoiceMenu } from "./ui/ChoiceMenu.tsx";
 import { localizeThreadTitle } from "../i18n/demoContent.ts";
 import { useI18n } from "../i18n/index.ts";
-import { cn, formatRelativeTime } from "../lib/utils.ts";
+import { cn, formatRelativeTime, resolveCommitVersionLabel } from "../lib/utils.ts";
 import { useCommandDeckStore, type ActivePage } from "../stores/useCommandDeckStore.ts";
 
 const STATUS_DOT: Record<string, string> = {
@@ -39,7 +42,11 @@ export function Sidebar() {
     threads,
     activeThreadId,
     activeWorkspace,
+    customWorkspaces,
+    appConfig,
+    commits,
     setActiveWorkspace,
+    addCustomWorkspace,
     setActiveThread,
     renameThread,
     deleteThread,
@@ -51,8 +58,8 @@ export function Sidebar() {
   const [threadFilter, setThreadFilter] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
-
-  if (sidebarCollapsed) return null;
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
 
   const readyProposalCount = proposals.filter(
     (p) => p.status === "ready" || p.status === "needs_reprobe",
@@ -60,8 +67,25 @@ export function Sidebar() {
   const runtimeApprovalsCount = pendingApprovals.length;
 
   const workspaces = Array.from(
-    new Set(["~/Work", "~/Projects/acme-data", ...threads.map((th) => th.workspacePath)]),
+    new Set(
+      [
+        activeWorkspace,
+        ...customWorkspaces,
+        appConfig?.defaultWorkspace,
+        ...threads.map((th) => th.workspacePath),
+        "~/Work",
+      ].filter((w): w is string => Boolean(w && w.trim())),
+    ),
   );
+
+  const handleAddWorkspaceSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = workspaceDraft.trim();
+    if (!cleaned) return;
+    addCustomWorkspace(cleaned);
+    setWorkspaceDraft("");
+    setAddingWorkspace(false);
+  };
 
   const workspaceThreads = threads.filter((th) => th.workspacePath === activeWorkspace);
   const normalizedFilter = threadFilter.trim().toLowerCase();
@@ -105,7 +129,16 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="flex w-[248px] shrink-0 flex-col border-r border-[var(--hx-border)] bg-[var(--hx-sidebar)] select-none">
+    <aside
+      aria-hidden={sidebarCollapsed}
+      className={cn(
+        "hx-sidebar flex shrink-0 flex-col overflow-hidden border-r bg-[var(--hx-sidebar)] select-none",
+        sidebarCollapsed
+          ? "pointer-events-none w-0 border-r-transparent opacity-0"
+          : "w-[248px] border-[var(--hx-border)] opacity-100",
+      )}
+    >
+      <div className="flex h-full w-[248px] flex-col">
       {/* Header: Brand Mark + Collapse */}
       <div className="flex h-12 shrink-0 items-center justify-between px-3.5">
         <button
@@ -192,8 +225,65 @@ export function Sidebar() {
 
         {/* Section: Workspace & Recent Tasks */}
         <div className="space-y-2 border-t border-[var(--hx-border)] pt-3">
-          <div className="px-2 text-[10px] font-semibold tracking-wider text-[var(--hx-text-3)]">
-            {t("nav.sectionWorkspace")}
+          <div className="flex items-center justify-between px-2">
+            <span className="text-[10px] font-semibold tracking-wider text-[var(--hx-text-3)]">
+              {t("nav.sectionWorkspace")}
+            </span>
+            <button
+              type="button"
+              data-testid="sidebar-add-workspace-btn"
+              title={t("nav.addWorkspace")}
+              aria-label={t("nav.addWorkspace")}
+              onClick={() => setAddingWorkspace((v) => !v)}
+              className={cn(
+                "hx-pressable rounded-md p-1 transition-colors",
+                addingWorkspace
+                  ? "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
+                  : "text-[var(--hx-text-3)] hover:bg-[var(--hx-muted)]/60 hover:text-[var(--hx-text)]",
+              )}
+            >
+              <FolderPlus className="h-3 w-3" />
+            </button>
+          </div>
+
+          <div className="hx-collapse" data-open={addingWorkspace ? "true" : "false"}>
+            <div className="hx-collapse-inner">
+              <form
+                onSubmit={handleAddWorkspaceSubmit}
+                className="mb-1.5 flex items-center gap-1 rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-surface)] px-2 py-1"
+              >
+                <input
+                  type="text"
+                  data-testid="sidebar-workspace-input"
+                  value={workspaceDraft}
+                  onChange={(e) => setWorkspaceDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setAddingWorkspace(false);
+                    }
+                  }}
+                  placeholder={t("nav.workspacePathPlaceholder")}
+                  className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-[var(--hx-text)] placeholder:text-[var(--hx-text-3)]"
+                />
+                <button
+                  type="submit"
+                  aria-label={t("common.add")}
+                  disabled={!workspaceDraft.trim()}
+                  className="hx-pressable rounded-md p-1 text-[var(--hx-accent)] hover:bg-[var(--hx-accent-soft)] disabled:opacity-35"
+                >
+                  <Check className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={t("common.cancel")}
+                  onClick={() => setAddingWorkspace(false)}
+                  className="hx-pressable rounded-md p-1 text-[var(--hx-text-3)] hover:text-[var(--hx-text)]"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </form>
+            </div>
           </div>
 
           <ChoiceMenu
@@ -305,7 +395,11 @@ export function Sidebar() {
                         <span>{formatRelativeTime(th.updatedAt, locale)}</span>
                         <span className="inline-flex items-center gap-1 font-mono">
                           <Cpu className="h-2.5 w-2.5" />
-                          {th.pinnedVersionLabel ?? "v7"}
+                          {resolveCommitVersionLabel(
+                            commits,
+                            th.pinnedCommitSha,
+                            th.pinnedVersionLabel,
+                          )}
                         </span>
                       </div>
                     </button>
@@ -383,6 +477,7 @@ export function Sidebar() {
             </button>
           );
         })}
+      </div>
       </div>
     </aside>
   );

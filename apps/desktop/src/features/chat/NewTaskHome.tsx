@@ -1,7 +1,7 @@
-import { ArrowRight, GitBranch, Sparkles } from "lucide-react";
+import { ArrowRight, GitBranch, KeyRound, Sparkles } from "lucide-react";
 import { localizeProposal } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
-import { shortSha } from "../../lib/utils.ts";
+import { resolveCommitSha, resolveCommitVersionLabel, shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { TaskComposer } from "./TaskComposer.tsx";
 
@@ -9,6 +9,7 @@ export function NewTaskHome() {
   const {
     proposals,
     commits,
+    providers,
     systemHealth,
     selectProposal,
     setActivePage,
@@ -17,9 +18,9 @@ export function NewTaskHome() {
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
 
-  const activeSha = systemHealth?.activeCommitSha ?? commits[0]?.sha ?? "a7f3c91";
-  const activeCommit = commits.find((c) => c.sha === activeSha) ?? commits[0];
-  const activeVersion = activeCommit?.versionTag ?? "v7";
+  const activeSha = resolveCommitSha(commits, systemHealth?.activeCommitSha);
+  const activeVersion = resolveCommitVersionLabel(commits, activeSha);
+  const hasEnabledProvider = providers.some((p) => p.enabled && p.models.length > 0);
 
   const scenarios = [
     { label: t("home.scenario1Label"), prompt: t("home.scenario1Prompt") },
@@ -63,6 +64,34 @@ export function NewTaskHome() {
             {t("home.openDeckLink")}
           </button>
         </div>
+
+        {/* Contextual First-Run Provider Setup Guide */}
+        {!hasEnabledProvider && (
+          <div
+            data-testid="home-provider-setup-banner"
+            className="hx-item-enter mt-5 flex w-full flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/35 bg-amber-50/75 px-4 py-3 text-xs dark:bg-amber-950/25"
+          >
+            <div className="flex min-w-0 items-start gap-2.5">
+              <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="min-w-0">
+                <div className="font-semibold text-amber-950 dark:text-amber-100">
+                  {t("home.setupProviderTitle")}
+                </div>
+                <p className="mt-0.5 text-[11px] text-amber-900/80 dark:text-amber-200/80">
+                  {t("home.setupProviderBody")}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivePage("providers")}
+              className="hx-pressable inline-flex shrink-0 items-center gap-1 rounded-xl bg-amber-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-amber-500"
+            >
+              <span>{t("home.setupProviderBtn")}</span>
+              <ArrowRight className="h-3 w-3" />
+            </button>
+          </div>
+        )}
 
         {/* Quick Scenario Pills */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">

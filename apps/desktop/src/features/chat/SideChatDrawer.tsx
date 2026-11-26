@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, MessageSquareOff, Send, ShieldCheck, X } from "lucide-react";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
+import { useAnimatedPresence } from "../../hooks/useAnimatedPresence.ts";
 import { localizeThreadTitle } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
 import { formatUsd } from "../../lib/utils.ts";
@@ -18,8 +19,21 @@ export function SideChatDrawer() {
   } = useCommandDeckStore();
   const { locale, t } = useI18n();
   const [question, setQuestion] = useState("");
+  const presence = useAnimatedPresence(sideChatOpen, 155);
 
-  if (!sideChatOpen) return null;
+  useEffect(() => {
+    if (!sideChatOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        toggleSideChat(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sideChatOpen, toggleSideChat]);
+
+  if (!presence.rendered) return null;
 
   const activeThread = threads.find((th) => th.id === activeThreadId) ?? null;
   const turns = activeThreadId ? (sideChatByThread[activeThreadId] ?? []) : [];
@@ -39,6 +53,7 @@ export function SideChatDrawer() {
     <div
       role="dialog"
       aria-label={t("sidechat.title")}
+      data-state={presence.closing ? "closing" : "open"}
       style={{ boxShadow: "var(--hx-shadow-popover)" }}
       className="hx-drawer fixed bottom-16 right-6 z-40 flex h-[440px] w-96 flex-col rounded-2xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)]"
     >

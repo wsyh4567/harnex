@@ -78,6 +78,8 @@ describe("ProvidersPanel Logic, Presets, Magpie importLink & Budget Sync", () =>
       "anthropic",
       "gemini",
       "deepseek",
+      "glm",
+      "kimi",
       "openrouter",
       "ollama",
     ]);
@@ -171,5 +173,27 @@ describe("ProvidersPanel Logic, Presets, Magpie importLink & Budget Sync", () =>
     const resynced = syncBudgetDraftFromStatus(updatedStatus);
     expect(resynced.dailyLimit).toBe("15");
     expect(resynced.pricingTable.some((r) => r.modelId === "deepseek-chat")).toBe(true);
+  });
+
+  it("preserves provider apiProtocol when pinning or unpinning a model", async () => {
+    const store = useCommandDeckStore.getState();
+    const openai = store.providers.find((p) => p.id === "prov-openai")!;
+    await store.saveProvider({
+      provider: {
+        id: openai.id,
+        name: openai.name,
+        kind: openai.kind,
+        apiProtocol: "responses",
+        baseUrl: openai.baseUrl,
+        models: openai.models,
+        keyringRef: openai.keyringRef,
+        hasApiKey: openai.hasApiKey,
+        source: openai.source,
+        enabled: openai.enabled,
+      },
+    });
+    await useCommandDeckStore.getState().togglePinnedModel(openai.id, openai.models[0]!);
+    const updated = useCommandDeckStore.getState().providers.find((p) => p.id === openai.id)!;
+    expect(updated.apiProtocol).toBe("responses");
   });
 });

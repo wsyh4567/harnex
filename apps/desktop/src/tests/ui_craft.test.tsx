@@ -9,6 +9,12 @@ import {
   MarkdownProse,
   parseMarkdownBlocks,
 } from "../components/ui/MarkdownProse.tsx";
+import { SegmentedTabs } from "../components/ui/SegmentedTabs.tsx";
+import {
+  formatToolDuration,
+  resolveCommitSha,
+  resolveCommitVersionLabel,
+} from "../lib/utils.ts";
 import {
   buildSplitDiffRows,
   computeDiffStats,
@@ -361,6 +367,55 @@ describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n",
     expect(html).toContain("turn-activity-feed");
     expect(html).toContain("bun test");
     expect(html).toContain("src/app.ts (L1-120)");
+    expect(html).toContain("420ms");
+    expect(html).toContain("hx-collapse");
     expect(html).toContain("0");
+  });
+
+  it("resolves real commit version labels without fake v7 fallback, handles init errors, custom workspaces, and SSR SegmentedTabs", async () => {
+    expect(resolveCommitVersionLabel([], undefined, undefined)).toBe("v1");
+    expect(
+      resolveCommitVersionLabel([{ sha: "f981a1b0000", versionTag: "v1" }], "f981a1b0000"),
+    ).toBe("v1");
+    expect(resolveCommitSha([{ sha: "f981a1b0000" }], undefined, undefined)).toBe("f981a1b0000");
+    expect(formatToolDuration(420)).toBe("420ms");
+    expect(formatToolDuration(2400)).toBe("2.4s");
+
+    const tabsHtml = renderToStaticMarkup(
+      <SegmentedTabs
+        value="a"
+        onChange={() => {}}
+        items={[
+          { id: "a", label: "Overview" },
+          { id: "b", label: "Diff", badge: 2 },
+        ]}
+      />,
+    );
+    expect(tabsHtml).toContain("Overview");
+    expect(tabsHtml).toContain("Diff");
+
+    // Custom workspace add/remove updates activeWorkspace cleanly
+    const store = useCommandDeckStore.getState();
+    store.addCustomWorkspace("D:\\Projects\\harnex-demo");
+    expect(useCommandDeckStore.getState().activeWorkspace).toBe("D:\\Projects\\harnex-demo");
+    expect(useCommandDeckStore.getState().customWorkspaces).toContain("D:\\Projects\\harnex-demo");
+    useCommandDeckStore.getState().removeCustomWorkspace("D:\\Projects\\harnex-demo");
+    expect(useCommandDeckStore.getState().customWorkspaces).not.toContain("D:\\Projects\\harnex-demo");
+
+    // Cold-start initialization failure surfaces recoverable initError instead of infinite spinner
+    const brokenAdapter = new MockIpcAdapter({ simulationDelayMs: 0 });
+    brokenAdapter.getSystemHealth = async () => {
+      throw new Error("sidecar pipe offline");
+    };
+    useCommandDeckStore.setState({ initialized: false, loading: false, initError: null });
+    await useCommandDeckStore.getState().initialize(brokenAdapter);
+    expect(useCommandDeckStore.getState().loading).toBe(false);
+    expect(useCommandDeckStore.getState().initialized).toBe(false);
+    expect(useCommandDeckStore.getState().initError).toContain("sidecar pipe offline");
+
+    // Retry with healthy adapter clears initError cleanly
+    await useCommandDeckStore.getState().initialize(new MockIpcAdapter({ simulationDelayMs: 0 }));
+    expect(useCommandDeckStore.getState().initialized).toBe(true);
+    expect(useCommandDeckStore.getState().initError).toBeNull();
   });
 });

@@ -137,6 +137,10 @@ impl Executor {
         self.sessions.lock().unwrap().retain(|(id, _)| id != thread);
     }
 
+    pub fn has_workspace(&self, thread: &str) -> bool {
+        self.workspaces.read().unwrap().contains_key(thread)
+    }
+
     pub fn clear_shadow(&self, thread: &str) {
         let mut bindings = self.workspaces.write().unwrap();
         if bindings

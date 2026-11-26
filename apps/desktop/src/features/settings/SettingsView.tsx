@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, Flame, Keyboard, Languages, Moon, RefreshCw, ShieldCheck, Sun } from "lucide-react";
+import tauriConfig from "../../../src-tauri/tauri.conf.json";
 import { ChoiceMenu } from "../../components/ui/ChoiceMenu.tsx";
 import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
 import { SUPPORTED_LOCALES, useI18n } from "../../i18n/index.ts";
@@ -181,7 +182,7 @@ export function SettingsView() {
                     <h3 className="font-semibold text-[var(--hx-text)]">{t("update.dialogTitle")}</h3>
                     <p className="mt-0.5 font-mono text-[11px] text-[var(--hx-text-3)]">
                       {t("update.currentVersion", {
-                        version: updateStatus?.info.currentVersion ?? "0.1.0",
+                        version: updateStatus?.info.currentVersion ?? tauriConfig.version,
                       })}
                     </p>
                   </div>

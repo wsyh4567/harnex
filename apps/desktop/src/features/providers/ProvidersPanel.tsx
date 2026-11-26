@@ -91,7 +91,7 @@ export function ProvidersPanel() {
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [modelsInput, setModelsInput] = useState("gpt-4.1-mini, gpt-4.1");
+  const [modelsInput, setModelsInput] = useState("");
   const [enabledDraft, setEnabledDraft] = useState(true);
   const [keyStrategyDraft, setKeyStrategyDraft] =
     useState<KeyRotationStrategy>("priority_failover");
@@ -134,7 +134,7 @@ export function ProvidersPanel() {
     setBaseUrl("https://api.openai.com/v1");
     setApiKey("");
     setShowApiKey(false);
-    setModelsInput("gpt-4.1-mini, gpt-4.1");
+    setModelsInput("");
     setEnabledDraft(true);
     setKeyStrategyDraft("priority_failover");
     setIsAggregatorDraft(false);
@@ -596,7 +596,7 @@ export function ProvidersPanel() {
               aria-label="Provider display name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Display Name (e.g. DeepSeek)"
+              placeholder={t("prov.namePlaceholder")}
               className="rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-subtle)] px-3 py-1.5 text-[var(--hx-text)]"
             />
             <ChoiceMenu
@@ -616,7 +616,7 @@ export function ProvidersPanel() {
               aria-label="Provider base URL"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="Base URL"
+              placeholder="https://api.openai.com/v1"
               className="rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-subtle)] px-3 py-1.5 font-mono text-[var(--hx-text)]"
             />
             <div className="relative flex items-center">
@@ -645,7 +645,7 @@ export function ProvidersPanel() {
               aria-label="Provider models"
               value={modelsInput}
               onChange={(e) => setModelsInput(e.target.value)}
-              placeholder="gpt-4.1-mini, gpt-4.1"
+              placeholder={t("prov.modelsPlaceholder")}
               className="min-w-44 flex-1 rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-subtle)] px-3 py-1.5 font-mono text-[var(--hx-text)]"
             />
             <ChoiceMenu

@@ -1601,6 +1601,7 @@ export class MockIpcAdapter implements HarnexIpcClient {
       id,
       name: params.provider.name,
       kind: params.provider.kind,
+      apiProtocol: params.provider.apiProtocol ?? existing?.apiProtocol,
       baseUrl: params.provider.baseUrl,
       models: [...params.provider.models],
       pinnedModels: params.provider.pinnedModels ?? existing?.pinnedModels,

@@ -69,6 +69,7 @@ export async function saveProviderWithKeys(input: z.infer<typeof SaveProviderSch
   const hasApiKey = !!(keys.size ? [...keys.values()].some(({ enabled }) => enabled) : writes.has(keyringRef) ||
     (!removals.has(keyringRef) && (existing?.keys?.length ? await bridge.keyringGet(keyringRef) : existing?.hasApiKey)));
   const record = ProviderConfigSchema.parse({ ...provider, id, baseUrl, keyringRef, isAggregator, hasApiKey,
+    apiProtocol: provider.apiProtocol ?? existing?.apiProtocol,
     keys: keys.size ? [...keys.values()] : undefined, pinnedModels: provider.pinnedModels ?? existing?.pinnedModels,
     keyStrategy: provider.keyStrategy ?? existing?.keyStrategy ?? "priority_failover" });
   for (const [ref, value] of writes) await bridge.keyringSet(ref, value);

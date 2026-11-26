@@ -50,6 +50,7 @@ export function TaskComposer({
     threads,
     activeThreadId,
     activeWorkspace,
+    customWorkspaces,
     setActiveWorkspace,
     setThreadMode,
     genomeFiles,
@@ -122,9 +123,17 @@ export function TaskComposer({
   const workspaces = useMemo(
     () =>
       Array.from(
-        new Set(["~/Work", "~/Projects/acme-data", ...threads.map((th) => th.workspacePath)]),
+        new Set(
+          [
+            activeWorkspace,
+            ...customWorkspaces,
+            appConfig?.defaultWorkspace,
+            ...threads.map((th) => th.workspacePath),
+            "~/Work",
+          ].filter((w): w is string => Boolean(w && w.trim())),
+        ),
       ),
-    [threads],
+    [activeWorkspace, customWorkspaces, appConfig?.defaultWorkspace, threads],
   );
 
   const modeOptions = useMemo(

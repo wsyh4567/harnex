@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { filterThreadChatApprovals } from "../../hooks/globalHookSelectors.ts";
+import { useAnimatedPresence } from "../../hooks/useAnimatedPresence.ts";
 import {
   localizeDomainLabel,
   localizeGoalTitle,
@@ -22,7 +23,7 @@ import {
   localizeThreadTitle,
 } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
-import { cn, formatTokens, shortSha } from "../../lib/utils.ts";
+import { cn, formatTokens, resolveCommitVersionLabel, shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { ApprovalCard } from "../security/ApprovalCard.tsx";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
@@ -34,6 +35,7 @@ export function ThreadWorkspace() {
   const {
     threads,
     activeThreadId,
+    commits,
     messagesByThread,
     streamingByThread,
     pendingApprovals,
@@ -52,7 +54,11 @@ export function ThreadWorkspace() {
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const prevThreadIdRef = useRef<string | null>(null);
   const prevMsgCountRef = useRef<number>(0);
+  const isNearBottomRef = useRef<boolean>(true);
   const msgCopyTimerRef = useRef<number | null>(null);
+
+  const scrollPillPresence = useAnimatedPresence(showScrollToBottom, 135);
+  const inspectorPresence = useAnimatedPresence(inspectorOpen, 155);
 
   const activeThread = threads.find((th) => th.id === activeThreadId) ?? null;
   const messages = activeThread ? (messagesByThread[activeThread.id] ?? []) : [];
@@ -66,10 +72,12 @@ export function ThreadWorkspace() {
   const updateScrollBottomState = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) {
+      isNearBottomRef.current = true;
       setShowScrollToBottom(false);
       return;
     }
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isNearBottomRef.current = distanceFromBottom <= 120;
     setShowScrollToBottom(distanceFromBottom > 160);
   }, []);
 
@@ -110,8 +118,9 @@ export function ThreadWorkspace() {
     if (threadChanged) {
       prevThreadIdRef.current = activeThreadId;
       prevMsgCountRef.current = messages.length;
+      isNearBottomRef.current = true;
       if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTop = 0;
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
       }
       updateScrollBottomState();
       return;
@@ -120,8 +129,11 @@ export function ThreadWorkspace() {
     const appendedMessage = messages.length > prevMsgCountRef.current;
     prevMsgCountRef.current = messages.length;
 
-    if (appendedMessage || Boolean(streaming)) {
+    if (appendedMessage) {
+      isNearBottomRef.current = true;
       streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else if (streaming && isNearBottomRef.current) {
+      streamEndRef.current?.scrollIntoView({ behavior: "auto" });
     }
     updateScrollBottomState();
   }, [activeThreadId, messages.length, streaming, updateScrollBottomState]);
@@ -141,6 +153,11 @@ export function ThreadWorkspace() {
     Math.round((activeThread.contextUsedTokens / activeThread.contextMaxTokens) * 100),
   );
   const allTools = messages.flatMap((m) => m.toolCalls ?? []);
+  const pinnedVersion = resolveCommitVersionLabel(
+    commits,
+    activeThread.pinnedCommitSha,
+    activeThread.pinnedVersionLabel,
+  );
 
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden bg-[var(--hx-canvas)]">
@@ -169,7 +186,7 @@ export function ThreadWorkspace() {
             <span className="hidden sm:inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-2 py-1 font-mono text-[11px] text-[var(--hx-text-2)]">
               <GitBranch className="h-3 w-3 text-[var(--hx-accent)]" />
               {t("chat.pinned", {
-                version: activeThread.pinnedVersionLabel ?? "v7",
+                version: pinnedVersion,
                 sha: shortSha(activeThread.pinnedCommitSha),
               })}
             </span>
@@ -247,7 +264,7 @@ export function ThreadWorkspace() {
               {messages.length === 0 && !streaming && (
                 <div className="rounded-2xl border border-dashed border-[var(--hx-border-strong)] bg-[var(--hx-surface)] p-6 text-center text-xs text-[var(--hx-text-2)]">
                   {t("chat.emptyThread", {
-                    version: activeThread.pinnedVersionLabel ?? "v7",
+                    version: pinnedVersion,
                     sha: shortSha(activeThread.pinnedCommitSha),
                   })}
                 </div>
@@ -301,7 +318,7 @@ export function ThreadWorkspace() {
                     {seg.finalContent && <MarkdownProse content={seg.finalContent} />}
 
                     {seg.finalContent && (
-                      <div className="flex items-center gap-1.5 pt-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
+                      <div className="flex items-center gap-1.5 pt-0.5 translate-y-0.5 opacity-0 transition-all duration-150 group-hover/msg:translate-y-0 group-hover/msg:opacity-100 focus-within:translate-y-0 focus-within:opacity-100">
                         <button
                           type="button"
                           onClick={() => void handleCopyResponse(seg.id, seg.finalContent)}
@@ -356,12 +373,16 @@ export function ThreadWorkspace() {
             </div>
           </div>
 
-          {showScrollToBottom && (
+          {scrollPillPresence.rendered && (
             <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
               <button
                 type="button"
-                onClick={() => streamEndRef.current?.scrollIntoView({ behavior: "smooth" })}
-                className="hx-pressable pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[var(--hx-border-strong)] bg-[var(--hx-surface)]/95 px-3 py-1.5 text-[11px] font-medium text-[var(--hx-text)] shadow-sm backdrop-blur hover:bg-[var(--hx-subtle)]"
+                data-state={scrollPillPresence.closing ? "closing" : "open"}
+                onClick={() => {
+                  isNearBottomRef.current = true;
+                  streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                }}
+                className="hx-float-pill hx-pressable pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[var(--hx-border-strong)] bg-[var(--hx-surface)]/95 px-3 py-1.5 text-[11px] font-medium text-[var(--hx-text)] shadow-sm backdrop-blur hover:bg-[var(--hx-subtle)]"
               >
                 <ArrowDown className="h-3 w-3 text-[var(--hx-accent)]" />
                 <span>{t("chat.scrollToBottom")}</span>
@@ -379,9 +400,10 @@ export function ThreadWorkspace() {
       </main>
 
       {/* Optional Right-Side Task Inspector Drawer */}
-      {inspectorOpen && (
+      {inspectorPresence.rendered && (
         <aside
           data-testid="thread-inspector-drawer"
+          data-state={inspectorPresence.closing ? "closing" : "open"}
           className="hx-drawer flex w-80 shrink-0 flex-col border-l border-[var(--hx-border)] bg-[var(--hx-sidebar)] p-4 text-xs"
         >
           <div className="flex items-center justify-between pb-3 border-b border-[var(--hx-border)]">
@@ -404,7 +426,7 @@ export function ThreadWorkspace() {
                 {t("chat.inspectorPinned")}
               </div>
               <div className="rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 font-mono text-[11px] text-[var(--hx-text)]">
-                {activeThread.pinnedVersionLabel ?? "v7"} · {shortSha(activeThread.pinnedCommitSha, 12)}
+                {pinnedVersion} · {shortSha(activeThread.pinnedCommitSha, 12)}
               </div>
             </div>
 

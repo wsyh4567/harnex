@@ -274,6 +274,133 @@
   transform: rotate(180deg);
 }
 
+.hx-chevron-right {
+  transition: transform 190ms var(--ease-out-fluid);
+}
+
+.hx-chevron-right[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+/* Smooth hardware-accelerated accordion reveal (CSS Grid 0fr -> 1fr) */
+.hx-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 220ms var(--ease-out-fluid),
+    opacity 170ms var(--ease-out-fluid);
+}
+
+.hx-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.hx-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Subtle native page & item entrance motion */
+@keyframes hx-page-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 5px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.hx-page-enter {
+  animation: hx-page-fade-up 180ms var(--ease-out-fluid) both;
+}
+
+@keyframes hx-item-slide-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.hx-item-enter {
+  animation: hx-item-slide-in 170ms var(--ease-out-fluid) both;
+}
+
+/* Smooth collapsible sidebar */
+.hx-sidebar {
+  transition:
+    width 220ms var(--ease-drawer),
+    opacity 180ms var(--ease-drawer),
+    border-color 180ms var(--ease-drawer);
+}
+
+/* Interruptible backdrop fade */
+.hx-backdrop {
+  opacity: 1;
+  transition: opacity 170ms var(--ease-out-fluid);
+}
+
+@starting-style {
+  .hx-backdrop {
+    opacity: 0;
+  }
+}
+
+.hx-backdrop[data-state="closing"] {
+  opacity: 0;
+  transition: opacity 140ms var(--ease-out-fluid);
+}
+
+/* Floating pill (e.g. Jump to latest) */
+.hx-float-pill {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition:
+    opacity 170ms var(--ease-out-fluid),
+    transform 190ms var(--ease-out-fluid);
+}
+
+@starting-style {
+  .hx-float-pill {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.95);
+  }
+}
+
+.hx-float-pill[data-state="closing"] {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.95);
+  transition:
+    opacity 130ms var(--ease-out-fluid),
+    transform 130ms var(--ease-out-fluid);
+}
+
+/* Toast progress bar */
+@keyframes hx-toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.hx-toast-bar {
+  transform-origin: left center;
+  animation: hx-toast-progress var(--hx-toast-duration, 4000ms) linear forwards;
+}
+
+.hx-toast:hover .hx-toast-bar {
+  animation-play-state: paused;
+}
+
 /* Interruptible Popover / Menu transition using @starting-style */
 .hx-popover {
   opacity: 1;
@@ -337,7 +464,15 @@
   }
 }
 
-/* Modal center entrance */
+.hx-drawer[data-state="closing"] {
+  opacity: 0;
+  transform: translate3d(16px, 0, 0);
+  transition:
+    opacity 150ms var(--ease-drawer),
+    transform 150ms var(--ease-drawer);
+}
+
+/* Modal center entrance & exit */
 .hx-modal {
   opacity: 1;
   transform: scale(1) translateY(0);
@@ -353,25 +488,46 @@
   }
 }
 
+.hx-modal[data-state="closing"] {
+  opacity: 0;
+  transform: scale(0.97) translateY(6px);
+  transition:
+    opacity 140ms var(--ease-out-fluid),
+    transform 140ms var(--ease-out-fluid);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hx-shimmer {
     animation: none !important;
     background-image: none !important;
     -webkit-text-fill-color: currentColor !important;
   }
+  .hx-page-enter,
+  .hx-item-enter {
+    animation: none !important;
+  }
   .hx-pressable:active:not(:disabled) {
     transform: none;
   }
+  .hx-collapse,
+  .hx-chevron,
+  .hx-chevron-right,
+  .hx-sidebar {
+    transition: none !important;
+  }
   .hx-popover,
   .hx-drawer,
-  .hx-modal {
+  .hx-modal,
+  .hx-backdrop,
+  .hx-float-pill {
     transform: none !important;
     transition: opacity 120ms ease !important;
   }
   @starting-style {
     .hx-popover,
     .hx-drawer,
-    .hx-modal {
+    .hx-modal,
+    .hx-float-pill {
       transform: none !important;
     }
   }

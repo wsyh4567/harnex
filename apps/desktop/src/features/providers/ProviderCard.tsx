@@ -4,7 +4,6 @@ import {
   Activity,
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Edit3,
   Eye,
@@ -196,6 +195,15 @@ export function ProviderCard({
             <span className="rounded-md border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--hx-text-2)]">
               {kindLabel}
             </span>
+            {(provider.kind === "openai" || provider.kind === "openai_compatible") && (
+              <span className="rounded-md border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--hx-text-2)]">
+                {provider.apiProtocol === "responses"
+                  ? "Responses"
+                  : provider.apiProtocol === "chat_completions"
+                    ? "Chat"
+                    : t("prov.protocolAutoBadge")}
+              </span>
+            )}
             <span className="rounded-md bg-[var(--hx-accent-soft)] px-1.5 py-0.5 text-[10px] text-[var(--hx-accent)]">
               {sourceLabel}
             </span>
@@ -349,11 +357,10 @@ export function ProviderCard({
               onClick={() => setKeyPoolOpen((v) => !v)}
               className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--hx-text)] hover:opacity-80"
             >
-              {keyPoolOpen ? (
-                <ChevronDown className="h-3 w-3 text-[var(--hx-text-3)]" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-[var(--hx-text-3)]" />
-              )}
+              <ChevronRight
+                data-open={keyPoolOpen ? "true" : "false"}
+                className="hx-chevron-right h-3 w-3 text-[var(--hx-text-3)]"
+              />
               <span>
                 {t("prov.keyPool", {
                   count: keys.length > 0 ? keys.length : provider.hasApiKey ? 1 : 0,
@@ -385,110 +392,112 @@ export function ProviderCard({
             </div>
           </div>
 
-          {keyPoolOpen && (
-            <div className="space-y-1.5 pt-1">
-              {keys.length === 0 ? (
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--hx-text-3)]">
-                  {provider.hasApiKey ? (
-                    <>
-                      <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                      <span>{t("prov.singleKeyHint", { ref: provider.keyringRef })}</span>
-                    </>
-                  ) : (
-                    <span>{t("prov.noKeyHint")}</span>
-                  )}
-                </div>
-              ) : (
-                keys.map((k, idx) => (
-                  <div
-                    key={k.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2.5 py-1.5 text-[11px]"
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="font-mono text-[10px] text-[var(--hx-text-3)]">
-                        #{idx + 1}
-                      </span>
-                      <span className="truncate font-medium text-[var(--hx-text)]">
-                        {localizeKeyLabel(k.label)}
-                      </span>
-                      {k.maskedHint && (
-                        <code className="font-mono text-[10px] text-[var(--hx-text-2)]">
-                          {k.maskedHint}
-                        </code>
-                      )}
-                      {k.lastError && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-                          <AlertCircle className="h-2.5 w-2.5" />
-                          {localizeKeyError(k.lastError)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        aria-label={`Toggle key ${k.label}`}
-                        onClick={() => onToggleKeyEnabled(provider, k.id)}
-                        className={cn(
-                          "rounded p-0.5 hover:bg-[var(--hx-subtle)]",
-                          k.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--hx-text-3)]",
-                        )}
-                      >
-                        <Power className="h-3 w-3" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Delete key ${k.label}`}
-                        onClick={() => onDeleteKey(provider, k.id)}
-                        className="rounded p-0.5 text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-rose-500"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
+          <div className="hx-collapse" data-open={keyPoolOpen ? "true" : "false"}>
+            <div className="hx-collapse-inner">
+              <div className="space-y-1.5 pt-2">
+                {keys.length === 0 ? (
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--hx-text-3)]">
+                    {provider.hasApiKey ? (
+                      <>
+                        <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                        <span>{t("prov.singleKeyHint", { ref: provider.keyringRef })}</span>
+                      </>
+                    ) : (
+                      <span>{t("prov.noKeyHint")}</span>
+                    )}
                   </div>
-                ))
-              )}
+                ) : (
+                  keys.map((k, idx) => (
+                    <div
+                      key={k.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2.5 py-1.5 text-[11px]"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="font-mono text-[10px] text-[var(--hx-text-3)]">
+                          #{idx + 1}
+                        </span>
+                        <span className="truncate font-medium text-[var(--hx-text)]">
+                          {localizeKeyLabel(k.label)}
+                        </span>
+                        {k.maskedHint && (
+                          <code className="font-mono text-[10px] text-[var(--hx-text-2)]">
+                            {k.maskedHint}
+                          </code>
+                        )}
+                        {k.lastError && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                            <AlertCircle className="h-2.5 w-2.5" />
+                            {localizeKeyError(k.lastError)}
+                          </span>
+                        )}
+                      </div>
 
-              <form
-                onSubmit={(e) => void handleAddKeySubmit(e)}
-                className="flex flex-wrap gap-1.5 pt-0.5"
-              >
-                <input
-                  type="text"
-                  aria-label={`New key label for ${provider.name}`}
-                  value={newKeyLabel}
-                  onChange={(e) => setNewKeyLabel(e.target.value)}
-                  placeholder={isZh ? "备用密钥 #2" : "Backup #2"}
-                  className="w-28 rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)] px-2.5 py-1 text-[11px] text-[var(--hx-text)]"
-                />
-                <div className="relative flex min-w-32 flex-1 items-center">
-                  <input
-                    type={showNewSecret ? "text" : "password"}
-                    aria-label={`New key secret for ${provider.name}`}
-                    value={newKeySecret}
-                    onChange={(e) => setNewKeySecret(e.target.value)}
-                    placeholder="sk-…"
-                    className="w-full rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)] py-1 pl-2.5 pr-7 font-mono text-[11px] text-[var(--hx-text)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNewSecret((v) => !v)}
-                    className="absolute right-2 text-[var(--hx-text-3)] hover:text-[var(--hx-text)]"
-                  >
-                    {showNewSecret ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                  </button>
-                </div>
-                <button
-                  type="submit"
-                  disabled={!newKeySecret.trim() || addingKey}
-                  className="hx-pressable inline-flex items-center gap-1 rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--hx-accent)] disabled:opacity-40"
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`Toggle key ${k.label}`}
+                          onClick={() => onToggleKeyEnabled(provider, k.id)}
+                          className={cn(
+                            "rounded p-0.5 hover:bg-[var(--hx-subtle)]",
+                            k.enabled ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--hx-text-3)]",
+                          )}
+                        >
+                          <Power className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete key ${k.label}`}
+                          onClick={() => onDeleteKey(provider, k.id)}
+                          className="rounded p-0.5 text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-rose-500"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                <form
+                  onSubmit={(e) => void handleAddKeySubmit(e)}
+                  className="flex flex-wrap gap-1.5 pt-0.5"
                 >
-                  <Plus className="h-3 w-3" />
-                  {t("prov.addKeyBtn")}
-                </button>
-              </form>
+                  <input
+                    type="text"
+                    aria-label={`New key label for ${provider.name}`}
+                    value={newKeyLabel}
+                    onChange={(e) => setNewKeyLabel(e.target.value)}
+                    placeholder={isZh ? "备用密钥 #2" : "Backup #2"}
+                    className="w-28 rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)] px-2.5 py-1 text-[11px] text-[var(--hx-text)]"
+                  />
+                  <div className="relative flex min-w-32 flex-1 items-center">
+                    <input
+                      type={showNewSecret ? "text" : "password"}
+                      aria-label={`New key secret for ${provider.name}`}
+                      value={newKeySecret}
+                      onChange={(e) => setNewKeySecret(e.target.value)}
+                      placeholder="sk-…"
+                      className="w-full rounded-xl border border-[var(--hx-border-strong)] bg-[var(--hx-surface)] py-1 pl-2.5 pr-7 font-mono text-[11px] text-[var(--hx-text)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewSecret((v) => !v)}
+                      className="absolute right-2 text-[var(--hx-text-3)] hover:text-[var(--hx-text)]"
+                    >
+                      {showNewSecret ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    </button>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!newKeySecret.trim() || addingKey}
+                    className="hx-pressable inline-flex items-center gap-1 rounded-xl border border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--hx-accent)] disabled:opacity-40"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {t("prov.addKeyBtn")}
+                  </button>
+                </form>
+              </div>
             </div>
-          )}
+          </div>
         </div>
       )}
     </div>

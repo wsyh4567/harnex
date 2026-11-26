@@ -3,7 +3,6 @@ import type { ChatMessage, ToolCallRecord } from "@harnex/protocol";
 import {
   Brain,
   Check,
-  ChevronDown,
   ChevronRight,
   Copy,
   FilePenLine,
@@ -18,7 +17,7 @@ import {
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { localizeMessage } from "../../i18n/demoContent.ts";
 import { useI18n, type Locale } from "../../i18n/index.ts";
-import { cn } from "../../lib/utils.ts";
+import { cn, formatToolDuration } from "../../lib/utils.ts";
 import type { ActivityTimelineItem } from "../../stores/useCommandDeckStore.ts";
 
 export type TurnDisplaySegment =
@@ -270,7 +269,7 @@ function CompactToolRow({
   const [expanded, setExpanded] = useState(
     tc.status === "awaiting_approval" || tc.status === "failed",
   );
-  const [copiedArgs, setCopiedArgs] = useState(false);
+  const [copiedField, setCopiedField] = useState<"args" | "output" | null>(null);
   const copyTimerRef = useRef<number | null>(null);
 
   const summary = useMemo(() => summarizeToolTarget(tc), [tc]);
@@ -285,23 +284,25 @@ function CompactToolRow({
     };
   }, []);
 
-  const handleCopyArgs = async () => {
+  const handleCopy = async (field: "args" | "output", value: string) => {
     try {
-      await navigator.clipboard?.writeText(prettyArgs);
-      setCopiedArgs(true);
+      await navigator.clipboard?.writeText(value);
+      setCopiedField(field);
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopiedArgs(false), 1600);
+      copyTimerRef.current = window.setTimeout(() => setCopiedField(null), 1600);
     } catch {
       // Ignore clipboard failures in restricted environments
     }
   };
 
   const outputText = localizedOutput ?? tc.output;
+  const durationLabel = tc.durationMs !== undefined ? formatToolDuration(tc.durationMs) : "";
 
   return (
-    <div data-testid={`tool-row-${tc.name}`} className="text-xs">
+    <div data-testid={`tool-row-${tc.name}`} className="hx-item-enter text-xs">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         className="group/row flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1 text-left transition-colors hover:bg-[var(--hx-subtle)]"
       >
@@ -331,6 +332,11 @@ function CompactToolRow({
               {t("chat.toolAwaiting")}
             </span>
           )}
+          {durationLabel && (
+            <span className="hx-num font-mono text-[10px] text-[var(--hx-text-3)] opacity-80">
+              {durationLabel}
+            </span>
+          )}
           {tc.exitCode !== undefined && (
             <span
               className={cn(
@@ -348,63 +354,79 @@ function CompactToolRow({
               {tc.status === "denied" ? t("chat.toolDenied") : t("chat.toolFailed")}
             </span>
           )}
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-[var(--hx-text-3)]" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-[var(--hx-text-3)]" />
-          )}
+          <ChevronRight
+            data-open={expanded ? "true" : "false"}
+            className="hx-chevron-right h-3.5 w-3.5 text-[var(--hx-text-3)]"
+          />
         </div>
       </button>
 
-      {expanded && (
-        <div className="mt-1 ml-5 space-y-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 font-mono text-[11px]">
-          <div className="rounded-lg bg-[var(--hx-subtle)] p-2">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <span className="text-[10px] font-medium text-[var(--hx-text-3)]">
-                {t("chat.toolArgs")}
-              </span>
-              <button
-                type="button"
-                title={t("chat.copyToolArgs")}
-                aria-label={t("chat.copyToolArgs")}
-                onClick={() => void handleCopyArgs()}
-                className="hx-pressable inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--hx-text-3)] hover:bg-[var(--hx-surface)] hover:text-[var(--hx-text)]"
-              >
-                {copiedArgs ? (
-                  <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                ) : (
-                  <Copy className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all text-[var(--hx-text-2)]">
-              {prettyArgs}
-            </pre>
-          </div>
-
-          {outputText && (
+      <div className="hx-collapse" data-open={expanded ? "true" : "false"}>
+        <div className="hx-collapse-inner">
+          <div className="mt-1 ml-5 space-y-1.5 rounded-xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-2.5 font-mono text-[11px]">
             <div className="rounded-lg bg-[var(--hx-subtle)] p-2">
-              <div className="mb-1 text-[10px] font-medium text-[var(--hx-text-3)]">
-                {t("chat.toolOutput")}
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-[10px] font-medium text-[var(--hx-text-3)]">
+                  {t("chat.toolArgs")}
+                </span>
+                <button
+                  type="button"
+                  title={t("chat.copyToolArgs")}
+                  aria-label={t("chat.copyToolArgs")}
+                  onClick={() => void handleCopy("args", prettyArgs)}
+                  className="hx-pressable inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--hx-text-3)] hover:bg-[var(--hx-surface)] hover:text-[var(--hx-text)]"
+                >
+                  {copiedField === "args" ? (
+                    <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
               </div>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-[var(--hx-text)]">
-                {outputText}
-                {tc.truncated && (
-                  <span className="ml-2 text-amber-600 dark:text-amber-400">
-                    {t("chat.truncated")}
-                  </span>
-                )}
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all text-[var(--hx-text-2)]">
+                {prettyArgs}
               </pre>
             </div>
-          )}
 
-          {tc.error && (
-            <div className="whitespace-pre-wrap rounded-lg bg-rose-50 p-2 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-              {tc.error}
-            </div>
-          )}
+            {outputText && (
+              <div className="rounded-lg bg-[var(--hx-subtle)] p-2">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-medium text-[var(--hx-text-3)]">
+                    {t("chat.toolOutput")}
+                  </span>
+                  <button
+                    type="button"
+                    title={t("chat.copyToolOutput")}
+                    aria-label={t("chat.copyToolOutput")}
+                    onClick={() => void handleCopy("output", outputText)}
+                    className="hx-pressable inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--hx-text-3)] hover:bg-[var(--hx-surface)] hover:text-[var(--hx-text)]"
+                  >
+                    {copiedField === "output" ? (
+                      <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </button>
+                </div>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-[var(--hx-text)]">
+                  {outputText}
+                  {tc.truncated && (
+                    <span className="ml-2 text-amber-600 dark:text-amber-400">
+                      {t("chat.truncated")}
+                    </span>
+                  )}
+                </pre>
+              </div>
+            )}
+
+            {tc.error && (
+              <div className="whitespace-pre-wrap rounded-lg bg-rose-50 p-2 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                {tc.error}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -429,9 +451,10 @@ function ReasoningRow({
   }, [text, liveScroll, expanded]);
 
   return (
-    <div data-testid="reasoning-row" className="text-xs">
+    <div data-testid="reasoning-row" className="hx-item-enter text-xs">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-[var(--hx-text-3)] transition-colors hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text-2)]"
       >
@@ -439,21 +462,22 @@ function ReasoningRow({
           <Brain className="h-3.5 w-3.5 shrink-0" />
           <span className="font-medium text-[12px]">{t("chat.reasoningLabel")}</span>
         </span>
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-        )}
+        <ChevronRight
+          data-open={expanded ? "true" : "false"}
+          className="hx-chevron-right h-3.5 w-3.5 shrink-0"
+        />
       </button>
 
-      {expanded && (
-        <div
-          ref={bodyRef}
-          className="mt-1 ml-2 max-h-56 overflow-y-auto border-l border-[var(--hx-border)] pl-3.5 pr-2 text-[12px] leading-relaxed text-[var(--hx-text-3)]"
-        >
-          <MarkdownProse content={text} className="text-[12px] text-[var(--hx-text-3)]" />
+      <div className="hx-collapse" data-open={expanded ? "true" : "false"}>
+        <div className="hx-collapse-inner">
+          <div
+            ref={bodyRef}
+            className="mt-1 ml-2 max-h-56 overflow-y-auto border-l border-[var(--hx-border)] pl-3.5 pr-2 text-[12px] leading-relaxed text-[var(--hx-text-3)]"
+          >
+            <MarkdownProse content={text} className="text-[12px] text-[var(--hx-text-3)]" />
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -544,6 +568,7 @@ export function TurnActivityFeed({
           <button
             type="button"
             data-testid="turn-activity-toggle"
+            aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
             className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-[12px] text-[var(--hx-text-2)] transition-colors hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]"
           >
@@ -556,33 +581,34 @@ export function TurnActivityFeed({
                 </span>
               )}
             </div>
-            {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--hx-text-3)]" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--hx-text-3)]" />
-            )}
+            <ChevronRight
+              data-open={expanded ? "true" : "false"}
+              className="hx-chevron-right h-3.5 w-3.5 shrink-0 text-[var(--hx-text-3)]"
+            />
           </button>
 
-          {expanded && (
-            <div className="mt-1 ml-2.5 space-y-1 border-l border-[var(--hx-border)] pl-3">
-              {activities.map((item) =>
-                item.kind === "reasoning" ? (
-                  <ReasoningRow
-                    key={item.id}
-                    text={item.text}
-                    defaultExpanded={isStreaming && item.id === lastReasoningId}
-                    liveScroll={isStreaming && item.id === lastReasoningId}
-                  />
-                ) : (
-                  <CompactToolRow
-                    key={item.id}
-                    tc={item.toolCall}
-                    localizedOutput={toolOutputs[item.toolCall.id]}
-                  />
-                ),
-              )}
+          <div className="hx-collapse" data-open={expanded ? "true" : "false"}>
+            <div className="hx-collapse-inner">
+              <div className="mt-1 ml-2.5 space-y-1 border-l border-[var(--hx-border)] pl-3">
+                {activities.map((item) =>
+                  item.kind === "reasoning" ? (
+                    <ReasoningRow
+                      key={item.id}
+                      text={item.text}
+                      defaultExpanded={isStreaming && item.id === lastReasoningId}
+                      liveScroll={isStreaming && item.id === lastReasoningId}
+                    />
+                  ) : (
+                    <CompactToolRow
+                      key={item.id}
+                      tc={item.toolCall}
+                      localizedOutput={toolOutputs[item.toolCall.id]}
+                    />
+                  ),
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 

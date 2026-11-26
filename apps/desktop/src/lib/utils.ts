@@ -9,6 +9,39 @@ export function shortSha(sha: string, len = 7): string {
   return sha.slice(0, len);
 }
 
+export function resolveCommitVersionLabel(
+  commits: ReadonlyArray<{ sha: string; versionTag: string }>,
+  sha?: string | null,
+  explicitLabel?: string | null,
+): string {
+  if (explicitLabel && explicitLabel.trim()) return explicitLabel;
+  if (sha) {
+    const matched = commits.find((c) => c.sha === sha || c.sha.startsWith(sha));
+    if (matched?.versionTag) return matched.versionTag;
+  }
+  return commits[0]?.versionTag ?? "v1";
+}
+
+export function resolveCommitSha(
+  commits: ReadonlyArray<{ sha: string }>,
+  sha?: string | null,
+  fallbackSha?: string | null,
+): string {
+  if (sha && sha.trim()) return sha;
+  if (fallbackSha && fallbackSha.trim()) return fallbackSha;
+  return commits[0]?.sha ?? "0000000";
+}
+
+export function formatToolDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const secs = ms / 1000;
+  if (secs < 60) return `${secs.toFixed(1)}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = Math.floor(secs % 60);
+  return `${mins}m ${rem}s`;
+}
+
 export function formatUsd(amount: number): string {
   if (amount < 0.01 && amount > 0) {
     return `$${amount.toFixed(4)}`;
