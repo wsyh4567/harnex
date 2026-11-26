@@ -1,4 +1,7 @@
-use super::app::{format_duration_compact, is_command_tool, App, TuiActivity, TuiTurn};
+use super::app::{
+    describe_risk_reason, format_duration_compact, is_command_tool, App, TuiActivity, TuiTurn,
+};
+use crate::protocol::{ApprovalRequest, RiskLevel};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -43,6 +46,12 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         "plan" => Color::Yellow,
         _ => Color::Green,
     };
+    let effort_color = match app.reasoning_effort.as_str() {
+        "high" => Color::LightMagenta,
+        "medium" => Color::Yellow,
+        "low" => Color::Green,
+        _ => Color::Gray,
+    };
     let ws_short = std::path::Path::new(&app.workspace)
         .file_name()
         .and_then(|s| s.to_str())
@@ -73,6 +82,11 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
             Style::default()
                 .fg(mode_color)
                 .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("effort:{}", app.reasoning_effort),
+            Style::default().fg(effort_color),
         ),
         Span::raw(" │ "),
         Span::styled("● ", dot_style),
@@ -122,7 +136,7 @@ fn render_conversation(frame: &mut Frame, app: &App, area: Rect) {
         )]));
         lines.push(Line::raw(""));
         lines.push(Line::from(vec![Span::styled(
-            "  Quick commands: /help  /mode <craft|plan|ask>  /models  /model <id>  /threads  /new  /evolve  /quit",
+            "  Quick commands: /help  /mode <craft|plan|ask>  /effort <auto|low|medium|high>  /models  /model <id>  /threads  /new  /evolve  /quit",
             Style::default().fg(Color::DarkGray),
         )]));
         lines.push(Line::from(vec![Span::styled(
@@ -169,6 +183,63 @@ fn render_conversation(frame: &mut Frame, app: &App, area: Rect) {
                             format!("  ℹ {part}"),
                             style,
                         )]));
+                    }
+                }
+                TuiTurn::Security(decision) => {
+                    let verdict = decision.decision.to_ascii_uppercase();
+                    let verdict_color = match decision.decision.as_str() {
+                        "deny" => Color::Red,
+                        "escalate" => Color::Yellow,
+                        _ => Color::Green,
+                    };
+                    let risk_color = risk_level_color(decision.risk_level);
+                    let mut header = vec![
+                        Span::styled(
+                            format!("  🛡 Guardian [{verdict} · {:?}]", decision.risk_level),
+                            Style::default()
+                                .fg(verdict_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    if let Some(code) = decision.risk_reason_code {
+                        let (tag, explanation) = describe_risk_reason(code);
+                        header.push(Span::raw(" "));
+                        header.push(Span::styled(
+                            tag.to_owned(),
+                            Style::default()
+                                .fg(risk_color)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                        header.push(Span::styled(
+                            format!(" {explanation}"),
+                            Style::default().fg(Color::Gray),
+                        ));
+                    }
+                    lines.push(Line::from(header));
+
+                    let target = decision.command_or_path.trim();
+                    let reason = decision.reason.trim();
+                    let mut detail_spans = vec![Span::styled(
+                        "    ",
+                        Style::default().fg(Color::DarkGray),
+                    )];
+                    if !target.is_empty() {
+                        detail_spans.push(Span::styled(
+                            truncate_chars(target, 72),
+                            Style::default().fg(Color::White),
+                        ));
+                    }
+                    if !target.is_empty() && !reason.is_empty() {
+                        detail_spans.push(Span::styled(" · ", Style::default().fg(Color::DarkGray)));
+                    }
+                    if !reason.is_empty() {
+                        detail_spans.push(Span::styled(
+                            reason.to_owned(),
+                            Style::default().fg(Color::DarkGray),
+                        ));
+                    }
+                    if !target.is_empty() || !reason.is_empty() {
+                        lines.push(Line::from(detail_spans));
                     }
                 }
                 TuiTurn::Assistant {
@@ -438,24 +509,62 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn render_approval_modal(frame: &mut Frame, request: &crate::protocol::ApprovalRequest, area: Rect) {
-    let modal_w = area.width.min(76);
-    let modal_h = area.height.min(13);
+fn risk_level_color(level: RiskLevel) -> Color {
+    match level {
+        RiskLevel::Critical => Color::Red,
+        RiskLevel::High => Color::LightRed,
+        RiskLevel::Medium => Color::Yellow,
+        RiskLevel::Low => Color::Green,
+    }
+}
+
+fn render_approval_modal(frame: &mut Frame, request: &ApprovalRequest, area: Rect) {
+    let modal_w = area.width.min(82);
+    let modal_h = area.height.min(15);
     let x = area.x + area.width.saturating_sub(modal_w) / 2;
     let y = area.y + area.height.saturating_sub(modal_h) / 2;
     let popup = Rect::new(x, y, modal_w, modal_h);
 
+    let risk_color = risk_level_color(request.risk_level);
+    let border_color = if request.risk_level == RiskLevel::Critical {
+        Color::Red
+    } else {
+        Color::Yellow
+    };
+
     frame.render_widget(Clear, popup);
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("Kind: ", Style::default().fg(Color::DarkGray)),
+    let mut lines = vec![Line::from(vec![
+        Span::styled("Kind: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:?}", request.kind),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  (Risk: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:?}", request.risk_level),
+            Style::default()
+                .fg(risk_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(")", Style::default().fg(Color::DarkGray)),
+    ])];
+    if let Some(code) = request.risk_reason_code {
+        let (tag, explanation) = describe_risk_reason(code);
+        lines.push(Line::from(vec![
+            Span::styled("Reason: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                format!("{:?}  (Risk: {:?})", request.kind, request.risk_level),
+                tag.to_owned(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(risk_color)
                     .add_modifier(Modifier::BOLD),
             ),
-        ]),
+            Span::raw(" "),
+            Span::styled(explanation.to_owned(), Style::default().fg(Color::White)),
+        ]));
+    }
+    lines.extend([
         Line::from(vec![
             Span::styled("Target: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -497,12 +606,12 @@ fn render_approval_modal(frame: &mut Frame, request: &crate::protocol::ApprovalR
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
-    ];
+    ]);
 
     let block = Block::default()
         .title(" ⚠ L0 Security Approval Required ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(border_color));
     let widget = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
@@ -619,7 +728,108 @@ mod tests {
             .map(|c| c.symbol())
             .collect();
         assert!(rendered.contains("Harnex TUI"));
+        assert!(rendered.contains("effort:auto"));
         assert!(rendered.contains("bun test"));
         assert!(rendered.contains("Inspecting workspace first"));
+    }
+
+    #[test]
+    fn renders_effort_new_tools_guardian_log_and_approval_risk_reason() {
+        use crate::protocol::{ApprovalRequestKind, GuardianDecision, RiskReasonCode};
+
+        let opts = TuiOptions {
+            workspace: PathBuf::from("/tmp/demo-project"),
+            mode: "craft".into(),
+            model: Some("gpt-5".into()),
+            provider: None,
+            sidecar: None,
+            data_dir: None,
+        };
+        let mut app = App::new(&opts);
+        app.sidecar_alive = true;
+        app.sandbox_backend = "seatbelt".into();
+        app.active_thread_id = Some("t1".into());
+        app.set_reasoning_effort("high").unwrap();
+        app.apply_event(&json!({
+            "type": "runner.started",
+            "threadId": "t1",
+            "runId": "r1"
+        }));
+        app.apply_event(&json!({
+            "type": "runner.tool_call",
+            "threadId": "t1",
+            "runId": "r1",
+            "toolCall": {
+                "id": "tc-web",
+                "name": "web_fetch",
+                "args": {"url": "https://docs.rs/ratatui/latest"},
+                "status": "completed"
+            }
+        }));
+        app.apply_event(&json!({
+            "type": "runner.tool_call",
+            "threadId": "t1",
+            "runId": "r1",
+            "toolCall": {
+                "id": "tc-sub",
+                "name": "delegate_subagent",
+                "args": {"profile": "sub_agents/researcher.md", "task": "Check API changes"},
+                "status": "completed"
+            }
+        }));
+        app.record_guardian_decision(GuardianDecision {
+            request_id: "gd-1".into(),
+            thread_id: "t1".into(),
+            decision: "escalate".into(),
+            risk_level: RiskLevel::High,
+            risk_reason_code: Some(RiskReasonCode::NetworkAccess),
+            reason: "Outbound call needs confirmation".into(),
+            command_or_path: "curl https://example.com".into(),
+            model_id: "l0-rules".into(),
+            sanitized_input_only: true,
+            timestamp: "2026-01-01T00:00:00Z".into(),
+        });
+
+        let backend = TestBackend::new(110, 32);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &app)).unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(rendered.contains("effort:high"));
+        assert!(rendered.contains("docs.rs/ratatui/latest"));
+        assert!(rendered.contains("@researcher"));
+        assert!(rendered.contains("[network_access]"));
+
+        // Now enqueue an approval request with ShellSyntax and verify modal rendering
+        app.approvals.push_back(ApprovalRequest {
+            request_id: "req-shell".into(),
+            thread_id: "t1".into(),
+            kind: ApprovalRequestKind::ShellCommand,
+            summary: "Run shell pipeline".into(),
+            detail: "Contains pipe operator".into(),
+            command_or_path: "ls | grep rs".into(),
+            risk_level: RiskLevel::Critical,
+            risk_reason_code: Some(RiskReasonCode::ShellSyntax),
+            sha256: None,
+            previous_sha256: None,
+            source_tags: vec![],
+            created_at: "2026-01-01T00:00:01Z".into(),
+        });
+        terminal.draw(|f| render(f, &app)).unwrap();
+        let modal_rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(modal_rendered.contains("[shell_syntax]"));
+        assert!(modal_rendered.contains("metacharacters"));
     }
 }

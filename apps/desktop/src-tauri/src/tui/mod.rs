@@ -142,6 +142,7 @@ pub async fn run(options: TuiOptions) -> io::Result<()> {
         tokio::select! {
             _ = tick.tick() => {
                 app.spinner_tick = app.spinner_tick.wrapping_add(1);
+                app.sync_guardian_decisions(&runtime.core.guardian_decisions());
                 if let Ok(health) = runtime.system_health() {
                     let was_alive = app.sidecar_alive;
                     app.sidecar_alive = health.sidecar_alive;
@@ -452,17 +453,18 @@ fn handle_slash(
         SlashCommand::Help => {
             app.push_system(
                 "Commands:\n\
-                 /mode <craft|plan|ask>     Switch execution mode (or Ctrl+M)\n\
-                 /models                    List available models from configured providers\n\
-                 /model <provider::model>   Override active model for this TUI session\n\
-                 /threads                   List recent threads\n\
-                 /use <index|id>            Switch to an existing thread\n\
-                 /new                       Start a fresh thread in current workspace\n\
-                 /pause | /resume | /abort  Control an active run\n\
-                 /steer <instruction>       Inject human steer while paused\n\
-                 /budget                    Show daily budget usage\n\
-                 /evolve [goal]             Trigger Harness² evolution in background\n\
-                 /clear | /quit             Clear viewport or exit Harnex TUI",
+                 /mode <craft|plan|ask>          Switch execution mode (or Ctrl+M)\n\
+                 /effort [auto|low|medium|high]  Show or set reasoning effort level\n\
+                 /models                         List available models from configured providers\n\
+                 /model <provider::model>        Override active model for this TUI session\n\
+                 /threads                        List recent threads\n\
+                 /use <index|id>                 Switch to an existing thread\n\
+                 /new                            Start a fresh thread in current workspace\n\
+                 /pause | /resume | /abort       Control an active run\n\
+                 /steer <instruction>            Inject human steer while paused\n\
+                 /budget                         Show daily budget usage\n\
+                 /evolve [goal]                  Trigger Harness² evolution in background\n\
+                 /clear | /quit                  Clear viewport or exit Harnex TUI",
                 false,
             );
         }
@@ -530,6 +532,25 @@ fn handle_slash(
             app.mode = mode.clone();
             app.status_hint = format!("Mode set to [{mode}]");
         }
+        SlashCommand::Effort(arg) => match arg {
+            None => {
+                let msg = format!(
+                    "Reasoning effort: [{}] (valid: auto, low, medium, high — use /effort <level>)",
+                    app.reasoning_effort
+                );
+                app.push_system(msg, false);
+                app.status_hint = format!("Reasoning effort: [{}]", app.reasoning_effort);
+            }
+            Some(level) => match app.set_reasoning_effort(&level) {
+                Ok(active) => {
+                    app.push_system(format!("Reasoning effort set to [{active}]."), false);
+                }
+                Err(err) => {
+                    app.push_system(err, true);
+                    app.status_hint = "Usage: /effort <auto|low|medium|high>".into();
+                }
+            },
+        },
         SlashCommand::ListModels => {
             if app.catalog.is_empty() {
                 app.push_system(
@@ -718,17 +739,7 @@ fn dispatch_run(
     thread_id: String,
     prompt: String,
 ) {
-    let mut params = json!({
-        "threadId": thread_id,
-        "prompt": prompt,
-        "mode": app.mode,
-    });
-    if let Some(model) = &app.model_override {
-        params["modelOverride"] = json!(model);
-    }
-    if let Some(provider) = &app.provider_override {
-        params["providerIdOverride"] = json!(provider);
-    }
+    let params = app.build_runner_start_params(&thread_id, &prompt);
     let rt = Arc::clone(runtime);
     let tx = bg_tx.clone();
     app.status_hint = "Starting task in L0 Sandbox...".into();

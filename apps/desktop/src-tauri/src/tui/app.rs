@@ -1,5 +1,5 @@
-use crate::protocol::ApprovalRequest;
-use serde_json::Value;
+use crate::protocol::{ApprovalRequest, GuardianDecision, RiskReasonCode};
+use serde_json::{json, Value};
 use std::{
     collections::VecDeque,
     path::PathBuf,
@@ -68,6 +68,7 @@ pub enum TuiTurn {
         text: String,
         is_error: bool,
     },
+    Security(GuardianDecision),
     Assistant {
         id: String,
         activities: Vec<TuiActivity>,
@@ -86,6 +87,7 @@ pub enum SlashCommand {
     ListThreads,
     UseThread(String),
     SetMode(String),
+    Effort(Option<String>),
     ListModels,
     SetModel { provider: Option<String>, model: String },
     Budget,
@@ -113,6 +115,7 @@ pub fn parse_slash_command(raw: &str) -> Option<SlashCommand> {
         "/threads" => SlashCommand::ListThreads,
         "/use" if !arg.is_empty() => SlashCommand::UseThread(arg.to_owned()),
         "/mode" if matches!(arg, "ask" | "plan" | "craft") => SlashCommand::SetMode(arg.to_owned()),
+        "/effort" => SlashCommand::Effort((!arg.is_empty()).then(|| arg.to_ascii_lowercase())),
         "/models" => SlashCommand::ListModels,
         "/model" if !arg.is_empty() => {
             if let Some((provider, model)) = arg.split_once("::") {
@@ -137,6 +140,92 @@ pub fn parse_slash_command(raw: &str) -> Option<SlashCommand> {
         "/quit" | "/exit" | "/q" => SlashCommand::Quit,
         _ => SlashCommand::Unknown(trimmed.to_owned()),
     })
+}
+
+pub fn is_valid_reasoning_effort(value: &str) -> bool {
+    matches!(value, "auto" | "low" | "medium" | "high")
+}
+
+pub fn describe_risk_reason(code: RiskReasonCode) -> (&'static str, &'static str) {
+    match code {
+        RiskReasonCode::SandboxEscape => (
+            "[sandbox_escape]",
+            "Action attempts to escape the L0 workspace sandbox",
+        ),
+        RiskReasonCode::ForbiddenPolicy => (
+            "[forbidden_policy]",
+            "Blocked by immutable L0 execution policy",
+        ),
+        RiskReasonCode::ShellSyntax => (
+            "[shell_syntax]",
+            "Command uses shell metacharacters, pipes, or redirection",
+        ),
+        RiskReasonCode::InterpreterExecution => (
+            "[interpreter_execution]",
+            "Invokes a script runtime or inline interpreter",
+        ),
+        RiskReasonCode::FileDeletion => (
+            "[file_deletion]",
+            "Deletes or removes workspace files",
+        ),
+        RiskReasonCode::NetworkAccess => (
+            "[network_access]",
+            "Requests outbound network access",
+        ),
+        RiskReasonCode::ProtectedPath => (
+            "[protected_path]",
+            "Targets a protected system, credential, or immutable L0 path",
+        ),
+        RiskReasonCode::UntrustedSource => (
+            "[untrusted_source]",
+            "Triggered under untrusted web, external-file, or MCP taint",
+        ),
+        RiskReasonCode::HookUntrusted => (
+            "[hook_untrusted]",
+            "Unverified hook requires explicit human trust",
+        ),
+        RiskReasonCode::HighPrivilegeProposal => (
+            "[high_privilege_proposal]",
+            "Modifies high-privilege harness scripts, hooks, or guardrails",
+        ),
+        RiskReasonCode::GuardianEscalated => (
+            "[guardian_escalated]",
+            "Guardian reviewer escalated this action for human review",
+        ),
+        RiskReasonCode::PolicyPrompt => (
+            "[policy_prompt]",
+            "Execution policy requires human confirmation",
+        ),
+    }
+}
+
+pub fn format_risk_reason(code: Option<RiskReasonCode>) -> Option<String> {
+    code.map(|c| {
+        let (tag, desc) = describe_risk_reason(c);
+        format!("{tag} {desc}")
+    })
+}
+
+pub fn format_guardian_decision(decision: &GuardianDecision) -> String {
+    let verdict = decision.decision.to_ascii_uppercase();
+    let mut parts = vec![format!("Guardian [{verdict} · {:?}]", decision.risk_level)];
+    if let Some(reason_text) = format_risk_reason(decision.risk_reason_code) {
+        parts.push(reason_text);
+    }
+    let mut detail_parts = Vec::new();
+    let target = decision.command_or_path.trim();
+    if !target.is_empty() {
+        detail_parts.push(target.to_owned());
+    }
+    let reason = decision.reason.trim();
+    if !reason.is_empty() {
+        detail_parts.push(reason.to_owned());
+    }
+    if detail_parts.is_empty() {
+        parts.join(" ")
+    } else {
+        format!("{} — {}", parts.join(" "), detail_parts.join(" · "))
+    }
 }
 
 pub fn is_command_tool(name: &str) -> bool {
@@ -234,6 +323,17 @@ pub fn summarize_tool_target(name: &str, args: &Value) -> String {
                 .map_or(0, Vec::len);
             format!("{count} goals")
         }
+        "web_fetch" => summarize_url_host_path(str_field("url")),
+        "delegate_subagent" => {
+            let profile = normalize_subagent_profile(str_field("profile"));
+            let task = summarize_compact_text(str_field("task"), 60);
+            match (!profile.is_empty(), !task.is_empty()) {
+                (true, true) => format!("@{profile} · {task}"),
+                (true, false) => format!("@{profile}"),
+                (false, true) => task,
+                (false, false) => String::new(),
+            }
+        }
         _ => {
             let compact = serde_json::to_string(args).unwrap_or_default();
             if compact == "{}" {
@@ -248,6 +348,7 @@ pub fn summarize_tool_target(name: &str, args: &Value) -> String {
 pub struct App {
     pub workspace: String,
     pub mode: String,
+    pub reasoning_effort: String,
     pub active_thread_id: Option<String>,
     pub active_thread_title: Option<String>,
     pub pinned_sha: String,
@@ -262,6 +363,7 @@ pub struct App {
     pub threads: Vec<ThreadSummary>,
     pub turns: Vec<TuiTurn>,
     pub approvals: VecDeque<ApprovalRequest>,
+    pub guardian_decisions: VecDeque<GuardianDecision>,
     pub input: String,
     pub cursor_char: usize,
     pub input_history: Vec<String>,
@@ -282,6 +384,7 @@ impl App {
         Self {
             workspace: options.workspace.to_string_lossy().into_owned(),
             mode: options.mode.clone(),
+            reasoning_effort: "auto".into(),
             active_thread_id: None,
             active_thread_title: None,
             pinned_sha: "-------".into(),
@@ -296,6 +399,7 @@ impl App {
             threads: Vec::new(),
             turns: Vec::new(),
             approvals: VecDeque::new(),
+            guardian_decisions: VecDeque::new(),
             input: String::new(),
             cursor_char: 0,
             input_history: Vec::new(),
@@ -335,6 +439,74 @@ impl App {
             _ => "craft".into(),
         };
         self.status_hint = format!("Mode switched to [{}]", self.mode);
+    }
+
+    pub fn set_reasoning_effort(&mut self, raw: &str) -> Result<String, String> {
+        let normalized = raw.trim().to_ascii_lowercase();
+        if !is_valid_reasoning_effort(&normalized) {
+            return Err(format!(
+                "Invalid reasoning effort '{}'. Usage: /effort <auto|low|medium|high>",
+                raw.trim()
+            ));
+        }
+        self.reasoning_effort = normalized.clone();
+        self.status_hint = format!("Reasoning effort set to [{}]", self.reasoning_effort);
+        Ok(normalized)
+    }
+
+    pub fn build_runner_start_params(&self, thread_id: &str, prompt: &str) -> Value {
+        let mut params = json!({
+            "threadId": thread_id,
+            "prompt": prompt,
+            "mode": self.mode,
+            "reasoningEffort": self.reasoning_effort,
+        });
+        if let Some(model) = &self.model_override {
+            params["modelOverride"] = json!(model);
+        }
+        if let Some(provider) = &self.provider_override {
+            params["providerIdOverride"] = json!(provider);
+        }
+        params
+    }
+
+    pub fn record_guardian_decision(&mut self, decision: GuardianDecision) -> bool {
+        let already_seen = self.guardian_decisions.iter().any(|existing| {
+            existing.request_id == decision.request_id && existing.timestamp == decision.timestamp
+        });
+        if already_seen {
+            return false;
+        }
+        if self.guardian_decisions.len() >= 100 {
+            self.guardian_decisions.pop_front();
+        }
+        self.guardian_decisions.push_back(decision.clone());
+
+        let matches_thread = self
+            .active_thread_id
+            .as_deref()
+            .map_or(true, |active| active == decision.thread_id);
+        if matches_thread {
+            let reason_tag = decision
+                .risk_reason_code
+                .map(|c| format!(" {}", describe_risk_reason(c).0))
+                .unwrap_or_default();
+            self.status_hint = format!(
+                "Guardian [{}]{}: {}",
+                decision.decision.to_ascii_uppercase(),
+                reason_tag,
+                decision.reason
+            );
+            self.turns.push(TuiTurn::Security(decision));
+            self.scroll_from_bottom = 0;
+        }
+        true
+    }
+
+    pub fn sync_guardian_decisions(&mut self, decisions: &[GuardianDecision]) {
+        for decision in decisions {
+            self.record_guardian_decision(decision.clone());
+        }
     }
 
     pub fn toggle_reasoning(&mut self) {
@@ -574,6 +746,12 @@ impl App {
                 }
             }
         }
+        let active_tid = self.active_thread_id.as_deref();
+        for decision in &self.guardian_decisions {
+            if active_tid.map_or(true, |tid| tid == decision.thread_id) {
+                self.turns.push(TuiTurn::Security(decision.clone()));
+            }
+        }
         self.scroll_from_bottom = 0;
     }
 
@@ -689,7 +867,9 @@ impl App {
                     .get("truncated")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
-                if let Some(TuiTurn::Assistant { activities, .. }) = self.turns.last_mut() {
+                if let Some(TuiTurn::Assistant { activities, .. }) =
+                    self.last_active_assistant_turn_mut()
+                {
                     for act in activities.iter_mut() {
                         if let TuiActivity::Tool {
                             id,
@@ -754,7 +934,7 @@ impl App {
                     activities,
                     activities_expanded,
                     ..
-                }) = self.turns.last_mut()
+                }) = self.last_active_assistant_turn_mut()
                 {
                     *running = false;
                     if let Some(start) = started_at.take() {
@@ -787,7 +967,7 @@ impl App {
                     started_at,
                     elapsed_ms,
                     ..
-                }) = self.turns.last_mut()
+                }) = self.last_active_assistant_turn_mut()
                 {
                     *running = false;
                     if let Some(start) = started_at.take() {
@@ -800,8 +980,14 @@ impl App {
             "security.approval_required" | "trust.hook_confirm" => {
                 if let Some(raw) = event.get("request") {
                     if let Ok(req) = serde_json::from_value::<ApprovalRequest>(raw.clone()) {
+                        let reason_tag = req
+                            .risk_reason_code
+                            .map(|c| format!(" {}", describe_risk_reason(c).0))
+                            .unwrap_or_default();
                         self.approvals.push_back(req);
-                        self.status_hint = "L0 approval required — press [A] Allow Once, [S] Session, [D] Deny".into();
+                        self.status_hint = format!(
+                            "L0 approval required{reason_tag} — press [A] Allow Once, [S] Session, [D] Deny"
+                        );
                     }
                 }
             }
@@ -810,27 +996,111 @@ impl App {
                     self.approvals.retain(|req| req.request_id != id);
                 }
             }
+            "guardian.decision" => {
+                if let Some(raw) = event.get("decision") {
+                    if let Ok(decision) = serde_json::from_value::<GuardianDecision>(raw.clone()) {
+                        self.record_guardian_decision(decision);
+                    }
+                }
+            }
             _ => {}
         }
     }
 
-    fn ensure_running_assistant_turn(&mut self) -> &mut TuiTurn {
-        let needs_new = !matches!(
-            self.turns.last(),
-            Some(TuiTurn::Assistant { running: true, .. })
-        );
-        if needs_new {
-            self.turns.push(TuiTurn::Assistant {
-                id: "live".into(),
-                activities: Vec::new(),
-                content: String::new(),
-                started_at: Some(Instant::now()),
-                elapsed_ms: None,
-                running: true,
-                activities_expanded: true,
-            });
+    fn last_active_assistant_turn_mut(&mut self) -> Option<&mut TuiTurn> {
+        let idx = self.turns.iter().rposition(|turn| {
+            matches!(turn, TuiTurn::Assistant { running: true, .. })
+        });
+        if let Some(i) = idx {
+            return self.turns.get_mut(i);
         }
+        self.turns
+            .iter_mut()
+            .rev()
+            .find(|turn| matches!(turn, TuiTurn::Assistant { .. }))
+    }
+
+    fn ensure_running_assistant_turn(&mut self) -> &mut TuiTurn {
+        let existing_idx = self.turns.iter().enumerate().rev().find_map(|(i, turn)| {
+            match turn {
+                TuiTurn::Assistant { running: true, .. } => Some(Some(i)),
+                TuiTurn::Security(_) | TuiTurn::System { .. } => None,
+                _ => Some(None),
+            }
+        });
+        if let Some(Some(idx)) = existing_idx {
+            return &mut self.turns[idx];
+        }
+        self.turns.push(TuiTurn::Assistant {
+            id: "live".into(),
+            activities: Vec::new(),
+            content: String::new(),
+            started_at: Some(Instant::now()),
+            elapsed_ms: None,
+            running: true,
+            activities_expanded: true,
+        });
         self.turns.last_mut().unwrap()
+    }
+}
+
+fn summarize_url_host_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let without_scheme = trimmed
+        .split_once("://")
+        .map_or(trimmed, |(_, rest)| rest);
+    let without_frag = without_scheme
+        .split_once('#')
+        .map_or(without_scheme, |(head, _)| head);
+    let without_query = without_frag
+        .split_once('?')
+        .map_or(without_frag, |(head, _)| head);
+    let (authority, path) = match without_query.find('/') {
+        Some(idx) => (&without_query[..idx], &without_query[idx..]),
+        None => (without_query, ""),
+    };
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, h)| h)
+        .trim();
+    if host.is_empty() {
+        return trimmed.to_owned();
+    }
+    let clean_path = path.trim_end_matches('/');
+    if clean_path.is_empty() {
+        host.to_owned()
+    } else {
+        format!("{host}{clean_path}")
+    }
+}
+
+fn normalize_subagent_profile(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let base = trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(trimmed);
+    base.strip_suffix(".md")
+        .or_else(|| base.strip_suffix(".MD"))
+        .unwrap_or(base)
+        .trim()
+        .to_owned()
+}
+
+fn summarize_compact_text(raw: &str, max_chars: usize) -> String {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = collapsed.chars();
+    let head: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
     }
 }
 
@@ -879,7 +1149,6 @@ fn activity_from_tool_json(tc: &Value, default_expanded: bool) -> TuiActivity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     fn sample_opts() -> TuiOptions {
         TuiOptions {
@@ -1026,5 +1295,179 @@ mod tests {
         app.clear_input();
         assert!(app.input.is_empty());
         assert_eq!(app.cursor_char, 0);
+    }
+
+    #[test]
+    fn effort_slash_command_validates_updates_and_populates_runner_start_params() {
+        assert_eq!(parse_slash_command("/effort"), Some(SlashCommand::Effort(None)));
+        assert_eq!(
+            parse_slash_command("/effort HIGH"),
+            Some(SlashCommand::Effort(Some("high".into())))
+        );
+        assert_eq!(
+            parse_slash_command("/effort turbo"),
+            Some(SlashCommand::Effort(Some("turbo".into())))
+        );
+
+        let mut app = App::new(&sample_opts());
+        assert_eq!(app.reasoning_effort, "auto");
+        assert_eq!(
+            app.build_runner_start_params("t1", "hi")["reasoningEffort"],
+            json!("auto")
+        );
+
+        assert_eq!(app.set_reasoning_effort("medium"), Ok("medium".into()));
+        assert_eq!(app.reasoning_effort, "medium");
+        assert!(app.status_hint.contains("medium"));
+        assert_eq!(
+            app.build_runner_start_params("t1", "hi")["reasoningEffort"],
+            json!("medium")
+        );
+
+        let err = app.set_reasoning_effort("ultra").unwrap_err();
+        assert!(err.contains("/effort <auto|low|medium|high>"));
+        assert_eq!(app.reasoning_effort, "medium");
+    }
+
+    #[test]
+    fn summarize_tool_target_formats_web_fetch_and_delegate_subagent() {
+        assert_eq!(
+            summarize_tool_target(
+                "web_fetch",
+                &json!({"url": "https://docs.rs/ratatui/latest/ratatui/?q=1#top"})
+            ),
+            "docs.rs/ratatui/latest/ratatui"
+        );
+        assert_eq!(
+            summarize_tool_target("web_fetch", &json!({"url": "https://example.com/"})),
+            "example.com"
+        );
+        assert_eq!(
+            summarize_tool_target(
+                "web_fetch",
+                &json!({"url": "https://user:secret@api.example.com:8443/v1/status"})
+            ),
+            "api.example.com:8443/v1/status"
+        );
+        assert_eq!(
+            summarize_tool_target(
+                "delegate_subagent",
+                &json!({
+                    "profile": "sub_agents/researcher.md",
+                    "task": "Inspect Cargo.toml\n  and list optional features"
+                })
+            ),
+            "@researcher · Inspect Cargo.toml and list optional features"
+        );
+        assert_eq!(
+            summarize_tool_target(
+                "delegate_subagent",
+                &json!({"profile": "auditor", "task": ""})
+            ),
+            "@auditor"
+        );
+    }
+
+    #[test]
+    fn risk_reason_codes_and_guardian_decisions_format_and_preserve_active_turn() {
+        let all_codes = [
+            (RiskReasonCode::SandboxEscape, "[sandbox_escape]"),
+            (RiskReasonCode::ForbiddenPolicy, "[forbidden_policy]"),
+            (RiskReasonCode::ShellSyntax, "[shell_syntax]"),
+            (RiskReasonCode::InterpreterExecution, "[interpreter_execution]"),
+            (RiskReasonCode::FileDeletion, "[file_deletion]"),
+            (RiskReasonCode::NetworkAccess, "[network_access]"),
+            (RiskReasonCode::ProtectedPath, "[protected_path]"),
+            (RiskReasonCode::UntrustedSource, "[untrusted_source]"),
+            (RiskReasonCode::HookUntrusted, "[hook_untrusted]"),
+            (RiskReasonCode::HighPrivilegeProposal, "[high_privilege_proposal]"),
+            (RiskReasonCode::GuardianEscalated, "[guardian_escalated]"),
+            (RiskReasonCode::PolicyPrompt, "[policy_prompt]"),
+        ];
+        for (code, expected_tag) in all_codes {
+            let (tag, desc) = describe_risk_reason(code);
+            assert_eq!(tag, expected_tag);
+            assert!(!desc.is_empty());
+            assert!(format_risk_reason(Some(code))
+                .unwrap()
+                .starts_with(expected_tag));
+        }
+        assert!(format_risk_reason(None).is_none());
+
+        let mut app = App::new(&sample_opts());
+        app.active_thread_id = Some("t1".into());
+        app.apply_event(&json!({
+            "type": "runner.started",
+            "threadId": "t1",
+            "runId": "r1"
+        }));
+        app.apply_event(&json!({
+            "type": "runner.tool_call",
+            "threadId": "t1",
+            "runId": "r1",
+            "toolCall": {
+                "id": "tc1",
+                "name": "shell",
+                "args": {"command": "curl", "args": ["https://example.com"]},
+                "status": "running"
+            }
+        }));
+        app.apply_event(&json!({
+            "type": "guardian.decision",
+            "decision": {
+                "requestId": "req-1",
+                "threadId": "t1",
+                "decision": "escalate",
+                "riskLevel": "high",
+                "riskReasonCode": "network_access",
+                "reason": "Human review required",
+                "commandOrPath": "curl https://example.com",
+                "modelId": "l0-rules",
+                "sanitizedInputOnly": true,
+                "timestamp": "2026-01-01T00:00:01Z"
+            }
+        }));
+        // Duplicate event is ignored
+        app.apply_event(&json!({
+            "type": "guardian.decision",
+            "decision": {
+                "requestId": "req-1",
+                "threadId": "t1",
+                "decision": "escalate",
+                "riskLevel": "high",
+                "riskReasonCode": "network_access",
+                "reason": "Human review required",
+                "commandOrPath": "curl https://example.com",
+                "modelId": "l0-rules",
+                "sanitizedInputOnly": true,
+                "timestamp": "2026-01-01T00:00:01Z"
+            }
+        }));
+        assert_eq!(app.guardian_decisions.len(), 1);
+        let formatted = format_guardian_decision(&app.guardian_decisions[0]);
+        assert!(formatted.contains("[ESCALATE · High]"));
+        assert!(formatted.contains("[network_access]"));
+
+        // Tool result and completion still resolve the active assistant turn cleanly
+        app.apply_event(&json!({
+            "type": "runner.tool_result",
+            "threadId": "t1",
+            "runId": "r1",
+            "toolCallId": "tc1",
+            "output": "200 OK",
+            "exitCode": 0,
+            "truncated": false
+        }));
+        app.apply_event(&json!({
+            "type": "runner.completed",
+            "threadId": "t1",
+            "runId": "r1",
+            "finalOutput": "Done."
+        }));
+        assert!(!app.is_running);
+        assert!(app.turns.iter().any(|t| matches!(
+            t,
+            TuiTurn::Assistant { content, running: false, .. } if content == "Done."
+        )));
     }
 }
