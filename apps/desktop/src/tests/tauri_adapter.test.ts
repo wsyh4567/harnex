@@ -141,9 +141,22 @@ describe("TauriIpcAdapter 1:1 Parity with tray.rs & Runtime Selection", () => {
       if (cmd === "trust_preview_import") {
         return {
           archivePath: "/tmp/in.json",
-          files: ["scripts/a.ts"],
+          files: ["scripts/a.ts", "manifest.json", "guardrails.md"],
           untrustedExecutables: ["scripts/a.ts"],
+          addedFiles: ["scripts/a.ts"],
+          overwrittenFiles: ["manifest.json"],
+          unchangedFiles: ["guardrails.md"],
         };
+      }
+      if (cmd === "git_toggle_organ") {
+        return {
+          ok: true,
+          newCommitSha: "toggle1234567890",
+          disabledPaths: ["skills/csv_audit/SKILL.md"],
+        };
+      }
+      if (cmd === "pick_workspace_directory") {
+        return "D:\\Workspaces\\harnex-sample";
       }
       if (cmd === "trust_execute_import") {
         return { importedCount: 1 };
@@ -174,7 +187,10 @@ describe("TauriIpcAdapter 1:1 Parity with tray.rs & Runtime Selection", () => {
     await adapter.revertToCommit("sha-v0", "regression");
     await adapter.scanExport();
     await adapter.confirmExport(true);
-    await adapter.previewImport("/tmp/in.json");
+    const preview = await adapter.previewImport("/tmp/in.json");
+    expect(preview.addedFiles).toEqual(["scripts/a.ts"]);
+    expect(preview.overwrittenFiles).toEqual(["manifest.json"]);
+    expect(preview.unchangedFiles).toEqual(["guardrails.md"]);
     // Even if caller supplies trustPaths, TauriIpcAdapter sends trustPaths: [] to satisfy tray.rs L0 zero-trust
     await adapter.executeImport("/tmp/in.json", ["scripts/a.ts"]);
     await adapter.getBudgetStatus();
@@ -601,6 +617,85 @@ describe("TauriIpcAdapter 1:1 Parity with tray.rs & Runtime Selection", () => {
     expect(report.findings).toHaveLength(1);
     expect(recordedInvokes).toEqual([
       { cmd: "sidecar_rpc", args: { method: "evolution.gardener_report", params: {} } },
+    ]);
+  });
+
+  it("matches tray.rs pick_workspace_directory, git_toggle_organ, and forwards reasoningEffort + attachments on runner.start", async () => {
+    const adapter = new TauriIpcAdapter();
+    invokeResponseFactory = (cmd, args) => {
+      if (cmd === "pick_workspace_directory") {
+        return args?.initialDir ? "D:\\Projects\\picked" : null;
+      }
+      if (cmd === "git_toggle_organ") {
+        return {
+          ok: true,
+          newCommitSha: "deadbeef12345678",
+          disabledPaths: ["skills/csv_audit/SKILL.md"],
+        };
+      }
+      if (cmd === "sidecar_rpc" && args?.method === "runner.start") {
+        return { runId: "run-999" };
+      }
+      return undefined;
+    };
+
+    const picked = await adapter.pickWorkspaceDirectory("~/Work");
+    expect(picked).toBe("D:\\Projects\\picked");
+    const cancelled = await adapter.pickWorkspaceDirectory();
+    expect(cancelled).toBeNull();
+
+    const toggled = await adapter.gitToggleOrgan("skills/csv_audit/SKILL.md", false);
+    expect(toggled).toEqual({
+      ok: true,
+      newCommitSha: "deadbeef12345678",
+      disabledPaths: ["skills/csv_audit/SKILL.md"],
+    });
+
+    const startRes = await adapter.startRun({
+      threadId: "thr-1",
+      prompt: "Analyze screenshot",
+      mode: "craft",
+      reasoningEffort: "high",
+      attachments: [
+        {
+          id: "att-1",
+          name: "chart.png",
+          mimeType: "image/png",
+          sizeBytes: 1280,
+          dataBase64: "iVBORw0KGgo=",
+        },
+      ],
+    });
+    expect(startRes.runId).toBe("run-999");
+
+    expect(recordedInvokes).toEqual([
+      { cmd: "pick_workspace_directory", args: { initialDir: "~/Work" } },
+      { cmd: "pick_workspace_directory", args: {} },
+      {
+        cmd: "git_toggle_organ",
+        args: { path: "skills/csv_audit/SKILL.md", enabled: false },
+      },
+      {
+        cmd: "sidecar_rpc",
+        args: {
+          method: "runner.start",
+          params: {
+            threadId: "thr-1",
+            prompt: "Analyze screenshot",
+            mode: "craft",
+            reasoningEffort: "high",
+            attachments: [
+              {
+                id: "att-1",
+                name: "chart.png",
+                mimeType: "image/png",
+                sizeBytes: 1280,
+                dataBase64: "iVBORw0KGgo=",
+              },
+            ],
+          },
+        },
+      },
     ]);
   });
 });

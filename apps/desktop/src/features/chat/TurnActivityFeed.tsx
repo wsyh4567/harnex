@@ -8,10 +8,12 @@ import {
   FilePenLine,
   FileText,
   FolderOpen,
+  Globe,
   ListChecks,
   Loader2,
   Search,
   Terminal,
+  Users,
   Wrench,
 } from "lucide-react";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
@@ -96,6 +98,24 @@ export function summarizeToolTarget(tc: ToolCallRecord): string {
     case "set_goals": {
       const count = Array.isArray(args.goals) ? args.goals.length : 0;
       return `${count} goals`;
+    }
+    case "web_fetch": {
+      const rawUrl = str("url").trim();
+      if (!rawUrl) return "";
+      try {
+        const parsed = new URL(rawUrl);
+        const pathPart = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "";
+        const combined = `${parsed.host}${pathPart}`;
+        return combined.length > 72 ? `${combined.slice(0, 69)}…` : combined;
+      } catch {
+        return rawUrl.length > 72 ? `${rawUrl.slice(0, 69)}…` : rawUrl;
+      }
+    }
+    case "delegate_subagent": {
+      const profile = str("profile").trim();
+      const task = str("task").replace(/\s+/g, " ").trim();
+      const snippet = task.length > 56 ? `${task.slice(0, 53)}…` : task;
+      return [profile, snippet].filter(Boolean).join(" · ");
     }
     default: {
       try {
@@ -245,6 +265,10 @@ function ToolKindIcon({ name }: { name: string }) {
       return <FolderOpen className={cls} />;
     case "set_goals":
       return <ListChecks className={cls} />;
+    case "web_fetch":
+      return <Globe className={cls} />;
+    case "delegate_subagent":
+      return <Users className={cls} />;
     default:
       return <Wrench className={cls} />;
   }

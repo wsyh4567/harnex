@@ -7,6 +7,7 @@ import {
   Copy,
   FlaskConical,
   GitBranch,
+  Image as ImageIcon,
   Loader2,
   MessageSquarePlus,
   PanelRight,
@@ -27,7 +28,7 @@ import { cn, formatTokens, resolveCommitVersionLabel, shortSha } from "../../lib
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { ApprovalCard } from "../security/ApprovalCard.tsx";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
-import { TaskComposer } from "./TaskComposer.tsx";
+import { TaskComposer, formatAttachmentSize } from "./TaskComposer.tsx";
 import { TrajectoryMiniTimeline } from "./TrajectoryMiniTimeline.tsx";
 import { buildTurnDisplaySegments, TurnActivityFeed } from "./TurnActivityFeed.tsx";
 
@@ -272,10 +273,32 @@ export function ThreadWorkspace() {
 
               {displaySegments.map((seg) => {
                 if (seg.kind === "user") {
+                  const msgAttachments = seg.message.attachments ?? [];
                   return (
                     <div key={seg.message.id} data-message-id={seg.message.id} className="flex justify-end">
-                      <div className="max-w-[82%] rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--hx-text)]">
-                        {seg.content}
+                      <div className="max-w-[82%] space-y-2 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--hx-text)]">
+                        {msgAttachments.length > 0 && (
+                          <div
+                            data-testid={`user-message-attachments-${seg.message.id}`}
+                            className="flex flex-wrap gap-1.5"
+                          >
+                            {msgAttachments.map((att) => (
+                              <span
+                                key={att.id}
+                                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-0.5 text-[11px] text-[var(--hx-text-2)]"
+                              >
+                                <ImageIcon className="h-3 w-3 shrink-0 text-[var(--hx-accent)]" />
+                                <span className="truncate max-w-[160px] font-medium text-[var(--hx-text)]">
+                                  {att.name}
+                                </span>
+                                <span className="hx-num shrink-0 font-mono text-[10px] text-[var(--hx-text-3)]">
+                                  {formatAttachmentSize(att.sizeBytes)}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div>{seg.content}</div>
                       </div>
                     </div>
                   );

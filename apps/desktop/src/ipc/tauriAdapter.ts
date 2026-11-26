@@ -34,7 +34,6 @@ import {
   type GuardianDecision,
   type HarnessCompatibilityReport,
   type HarnessGardenerReport,
-  type ImportPreview,
   type OnboardingReplayTrace,
   type PricingSyncParams,
   type PricingSyncResult,
@@ -66,11 +65,25 @@ import type {
   HarnexIpcEvent,
   LiveChallengeParams,
   MagpieImportParams,
+  OrganToggleResult,
   PingProviderResult,
   SaveHookParams,
   SaveProviderParams,
+  StagedImportPreview,
   UpdateBudgetSettingsParams,
 } from "./types.ts";
+
+export const StagedImportPreviewSchema = ImportPreviewSchema.extend({
+  addedFiles: z.array(z.string()).optional(),
+  overwrittenFiles: z.array(z.string()).optional(),
+  unchangedFiles: z.array(z.string()).optional(),
+});
+
+export const OrganToggleResultSchema = z.object({
+  ok: z.boolean(),
+  newCommitSha: z.string().optional(),
+  disabledPaths: z.array(z.string()),
+});
 
 export const HarnexIpcEventSchema = z.union([
   RunnerEventSchema,
@@ -135,6 +148,15 @@ export class TauriIpcAdapter implements HarnexIpcClient {
 
   setRsiMode(mode: RsiMode): Promise<AppConfig> {
     return this.rpc<AppConfig>("config.set_rsi_mode", { rsiMode: mode });
+  }
+
+  async pickWorkspaceDirectory(initialDir?: string): Promise<string | null> {
+    const trimmed = initialDir?.trim();
+    const result = await this.invokeCmd<string | null>(
+      "pick_workspace_directory",
+      trimmed ? { initialDir: trimmed } : {},
+    );
+    return typeof result === "string" && result.trim() ? result : null;
   }
 
   async getOnboardingReplay(): Promise<OnboardingReplayTrace> {
@@ -309,6 +331,11 @@ export class TauriIpcAdapter implements HarnexIpcClient {
     return this.invokeCmd<GenomeCommit>("git_revert", { targetSha, reason });
   }
 
+  async gitToggleOrgan(path: string, enabled: boolean): Promise<OrganToggleResult> {
+    const raw = await this.invokeCmd<unknown>("git_toggle_organ", { path, enabled });
+    return OrganToggleResultSchema.parse(raw);
+  }
+
   scanExport(): Promise<ExportScanResult> {
     return this.invokeCmd<ExportScanResult>("git_scan_export");
   }
@@ -319,9 +346,9 @@ export class TauriIpcAdapter implements HarnexIpcClient {
     });
   }
 
-  async previewImport(archivePath: string): Promise<ImportPreview> {
+  async previewImport(archivePath: string): Promise<StagedImportPreview> {
     const raw = await this.invokeCmd<unknown>("trust_preview_import", { archivePath });
-    return ImportPreviewSchema.parse(raw);
+    return StagedImportPreviewSchema.parse(raw);
   }
 
   /**

@@ -1,5 +1,10 @@
 import { useState } from "react";
-import type { ExecPolicyAction, GlobalHookItem, TrustStatus } from "@harnex/protocol";
+import type {
+  ExecPolicyAction,
+  GlobalHookItem,
+  GuardianDecision,
+  TrustStatus,
+} from "@harnex/protocol";
 import {
   Bot,
   Code2,
@@ -18,6 +23,7 @@ import type { GlobalHookEvent } from "../../ipc/types.ts";
 import { cn, formatRelativeTime, shortSha } from "../../lib/utils.ts";
 import { useCommandDeckStore } from "../../stores/useCommandDeckStore.ts";
 import { ApprovalCard } from "./ApprovalCard.tsx";
+import { getRiskReasonMeta } from "./riskReasonMeta.ts";
 
 const HOOK_EVENTS: GlobalHookEvent[] = ["PreToolUse", "PostToolUse", "SessionStart"];
 
@@ -27,6 +33,77 @@ const DEFAULT_NEW_HOOK_TEMPLATE = [
   "  return { ok: true };",
   "}",
 ].join("\n");
+
+export function GuardianDecisionCard({ decision: gd }: { decision: GuardianDecision }) {
+  const { locale, t } = useI18n();
+  const decLabel =
+    gd.decision === "allow"
+      ? t("sec.decisionAllow")
+      : gd.decision === "deny"
+        ? t("sec.decisionDeny")
+        : t("sec.decisionEscalate");
+  const riskLabel =
+    gd.riskLevel === "low"
+      ? t("sec.riskLow")
+      : gd.riskLevel === "medium"
+        ? t("sec.riskMedium")
+        : gd.riskLevel === "high"
+          ? t("sec.riskHigh")
+          : t("sec.riskCritical");
+  const reasonMeta = getRiskReasonMeta(gd.riskReasonCode);
+
+  return (
+    <div className="space-y-1.5 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <span
+            className={cn(
+              "rounded-md px-2 py-0.5 text-[10px] font-medium",
+              gd.decision === "allow"
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+                : gd.decision === "deny"
+                  ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
+                  : "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+            )}
+          >
+            {decLabel}
+          </span>
+          {reasonMeta && (
+            <span
+              data-testid={`guardian-reason-badge-${gd.requestId}`}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-tight",
+                reasonMeta.badgeClass,
+              )}
+            >
+              {t(reasonMeta.labelKey)}
+            </span>
+          )}
+          <code className="truncate font-mono text-[11px] text-[var(--hx-text)]">
+            {gd.commandOrPath}
+          </code>
+        </div>
+        <span className="shrink-0 text-[10px] text-[var(--hx-text-3)]">
+          {formatRelativeTime(gd.timestamp, locale)}
+        </span>
+      </div>
+      {reasonMeta && (
+        <p
+          data-testid={`guardian-reason-explanation-${gd.requestId}`}
+          className="text-[11px] leading-snug text-[var(--hx-text-2)]"
+        >
+          {t(reasonMeta.descKey)}
+        </p>
+      )}
+      <p className="text-[11px] text-[var(--hx-text-2)]">
+        {localizeGuardianDecision(gd, locale)}
+      </p>
+      <div className="text-[10px] text-[var(--hx-text-3)]">
+        {t("sec.reviewer", { model: gd.modelId, risk: riskLabel })}
+      </div>
+    </div>
+  );
+}
 
 export function SecurityCenterPanel() {
   const {
@@ -524,57 +601,9 @@ export function SecurityCenterPanel() {
         </div>
 
         <div className="space-y-2">
-          {guardianDecisions.map((gd) => {
-            const decLabel =
-              gd.decision === "allow"
-                ? t("sec.decisionAllow")
-                : gd.decision === "deny"
-                  ? t("sec.decisionDeny")
-                  : t("sec.decisionEscalate");
-            const riskLabel =
-              gd.riskLevel === "low"
-                ? t("sec.riskLow")
-                : gd.riskLevel === "medium"
-                  ? t("sec.riskMedium")
-                  : gd.riskLevel === "high"
-                    ? t("sec.riskHigh")
-                    : t("sec.riskCritical");
-            return (
-              <div
-                key={`${gd.requestId}-${gd.timestamp}`}
-                className="space-y-1.5 rounded-2xl border border-[var(--hx-border)] bg-[var(--hx-surface)] p-3 text-xs"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "rounded-md px-2 py-0.5 text-[10px] font-medium",
-                        gd.decision === "allow"
-                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-                          : gd.decision === "deny"
-                            ? "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
-                            : "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-                      )}
-                    >
-                      {decLabel}
-                    </span>
-                    <code className="font-mono text-[11px] text-[var(--hx-text)]">
-                      {gd.commandOrPath}
-                    </code>
-                  </div>
-                  <span className="text-[10px] text-[var(--hx-text-3)]">
-                    {formatRelativeTime(gd.timestamp, locale)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-[var(--hx-text-2)]">
-                  {localizeGuardianDecision(gd, locale)}
-                </p>
-                <div className="text-[10px] text-[var(--hx-text-3)]">
-                  {t("sec.reviewer", { model: gd.modelId, risk: riskLabel })}
-                </div>
-              </div>
-            );
-          })}
+          {guardianDecisions.map((gd) => (
+            <GuardianDecisionCard key={`${gd.requestId}-${gd.timestamp}`} decision={gd} />
+          ))}
         </div>
       </section>
     </div>

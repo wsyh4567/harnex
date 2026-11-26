@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import type { GenomeCommit, GenomeFile } from "@harnex/protocol";
+import type {
+  GardenerFinding,
+  GenomeCommit,
+  GenomeFile,
+  GlobalHookItem,
+  HarnessGardenerReport,
+  TrustRecord,
+  TrustStatus,
+} from "@harnex/protocol";
 import {
+  AlertTriangle,
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -9,8 +19,13 @@ import {
   FileCode2,
   GitCompare,
   Loader2,
+  Plug,
+  Power,
   Search,
   Sparkles,
+  Terminal,
+  Webhook,
+  Wrench,
 } from "lucide-react";
 import { MarkdownProse } from "../../components/ui/MarkdownProse.tsx";
 import { SegmentedTabs } from "../../components/ui/SegmentedTabs.tsx";
@@ -338,14 +353,288 @@ export function computeTreeFileDiffs(
   return diffs;
 }
 
+export type CapabilityCardKind = "skill" | "sub_agent" | "hook" | "script" | "mcp";
+
+export interface CapabilityCardItem {
+  id: string;
+  kind: CapabilityCardKind;
+  name: string;
+  path: string;
+  description: string;
+  estimatedTokens: number;
+  toggleable: boolean;
+  enabled: boolean;
+  trustStatus?: TrustStatus;
+  origin?: TrustRecord["origin"];
+  hookItem?: GlobalHookItem;
+  gardenerFindings: GardenerFinding[];
+}
+
+export function parseDisabledOrgans(files: readonly GenomeFile[]): Set<string> {
+  const entry = files.find((f) => normalizePath(f.path) === "meta/disabled_organs.json");
+  if (!entry) return new Set();
+  try {
+    const parsed = JSON.parse(entry.content) as { disabled?: unknown };
+    if (!Array.isArray(parsed.disabled)) return new Set();
+    return new Set(
+      parsed.disabled
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => normalizePath(item.trim())),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function parseFrontmatterAndSummary(content: string): {
+  name?: string;
+  description?: string;
+  heading?: string;
+  firstBodyLine?: string;
+} {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  let body = normalized;
+  let name: string | undefined;
+  let description: string | undefined;
+
+  if (normalized.startsWith("---\n")) {
+    const endIdx = normalized.indexOf("\n---", 4);
+    if (endIdx > 0) {
+      const fm = normalized.slice(4, endIdx);
+      body = normalized.slice(endIdx + 4).trim();
+      for (const line of fm.split("\n")) {
+        const m = /^\s*(name|description)\s*:\s*(.+)$/.exec(line);
+        if (!m?.[1] || !m[2]) continue;
+        const val = m[2].trim().replace(/^["']|["']$/g, "");
+        if (m[1] === "name" && val) name = val;
+        if (m[1] === "description" && val) description = val;
+      }
+    }
+  }
+
+  let heading: string | undefined;
+  let firstBodyLine: string | undefined;
+  for (const rawLine of body.split("\n")) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("#")) {
+      if (!heading) heading = trimmed.replace(/^#+\s*/, "").trim();
+      continue;
+    }
+    if (!firstBodyLine) {
+      firstBodyLine = trimmed.replace(/^[-*+]\s+/, "").trim();
+      break;
+    }
+  }
+  return { name, description, heading, firstBodyLine };
+}
+
+export function buildCapabilityCards(params: {
+  files: readonly GenomeFile[];
+  trustRecords?: readonly TrustRecord[];
+  globalHooks?: readonly GlobalHookItem[];
+  gardenerReport?: HarnessGardenerReport | null;
+}): CapabilityCardItem[] {
+  const { files, trustRecords = [], globalHooks = [], gardenerReport } = params;
+  const disabledSet = parseDisabledOrgans(files);
+  const findingsByPath = new Map<string, GardenerFinding[]>();
+  for (const finding of gardenerReport?.findings ?? []) {
+    const key = normalizePath(finding.path);
+    const list = findingsByPath.get(key) ?? [];
+    list.push(finding);
+    findingsByPath.set(key, list);
+  }
+
+  const cards: CapabilityCardItem[] = [];
+
+  for (const file of files) {
+    const norm = normalizePath(file.path);
+    const tokens = Math.max(1, Math.ceil((file.sizeBytes || file.content.length) / 4));
+    const findings = findingsByPath.get(norm) ?? [];
+
+    // 1. Skill (skills/*/SKILL.md)
+    if (
+      (norm.startsWith("skills/") && /SKILL\.md$/i.test(norm)) ||
+      (file.component === "skills" && /\.md$/i.test(norm))
+    ) {
+      const parsed = parseFrontmatterAndSummary(file.content);
+      const folderSlug = norm
+        .replace(/^skills\//, "")
+        .replace(/\/SKILL\.md$/i, "")
+        .replace(/\.md$/i, "");
+      cards.push({
+        id: `skill:${norm}`,
+        kind: "skill",
+        name: parsed.name || parsed.heading || folderSlug || norm,
+        path: norm,
+        description: parsed.description || parsed.firstBodyLine || "",
+        estimatedTokens: tokens,
+        toggleable: true,
+        enabled: !disabledSet.has(norm),
+        gardenerFindings: findings,
+      });
+      continue;
+    }
+
+    // 2. Sub-Agent (sub_agents/*.md)
+    if (
+      (norm.startsWith("sub_agents/") && /\.md$/i.test(norm)) ||
+      file.component === "sub_agents"
+    ) {
+      const parsed = parseFrontmatterAndSummary(file.content);
+      const slug = norm.replace(/^sub_agents\//, "").replace(/\.md$/i, "");
+      cards.push({
+        id: `sub_agent:${norm}`,
+        kind: "sub_agent",
+        name: parsed.name || parsed.heading || slug || norm,
+        path: norm,
+        description: parsed.description || parsed.firstBodyLine || "",
+        estimatedTokens: tokens,
+        toggleable: true,
+        enabled: !disabledSet.has(norm),
+        gardenerFindings: findings,
+      });
+      continue;
+    }
+
+    // 3. Hook (hooks/*.ts)
+    if ((norm.startsWith("hooks/") && norm.endsWith(".ts")) || file.component === "hooks") {
+      const hookItem = globalHooks.find((h) => normalizePath(h.path) === norm);
+      const trustRec = trustRecords.find(
+        (r) => r.kind === "hook" && normalizePath(r.identifier) === norm,
+      );
+      const status: TrustStatus = hookItem?.status ?? trustRec?.status ?? "untrusted";
+      const slug = norm.replace(/^hooks\//, "").replace(/\.ts$/i, "");
+      const firstComment = file.content
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l.startsWith("//") && !l.startsWith("// @event"));
+      cards.push({
+        id: `hook:${norm}`,
+        kind: "hook",
+        name: hookItem?.name || slug || norm,
+        path: norm,
+        description: firstComment ? firstComment.replace(/^\/\/\s*/, "") : hookItem?.event ?? "",
+        estimatedTokens: tokens,
+        toggleable: false,
+        enabled: status === "trusted",
+        trustStatus: status,
+        origin: hookItem?.origin ?? trustRec?.origin,
+        hookItem,
+        gardenerFindings: findings,
+      });
+      continue;
+    }
+
+    // 4. Script (scripts/*)
+    if (norm.startsWith("scripts/") || file.component === "scripts") {
+      const trustRec = trustRecords.find(
+        (r) => r.kind === "script" && normalizePath(r.identifier) === norm,
+      );
+      const status: TrustStatus = trustRec?.status ?? "untrusted";
+      const slug = norm.replace(/^scripts\//, "");
+      const firstComment = file.content
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l.startsWith("//") || l.startsWith("#"));
+      cards.push({
+        id: `script:${norm}`,
+        kind: "script",
+        name: slug || norm,
+        path: norm,
+        description: firstComment ? firstComment.replace(/^(?:\/\/|#)\s*/, "") : "",
+        estimatedTokens: tokens,
+        toggleable: false,
+        enabled: status === "trusted",
+        trustStatus: status,
+        origin: trustRec?.origin,
+        gardenerFindings: findings,
+      });
+      continue;
+    }
+
+    // 5. MCP (mcp/servers.json)
+    if (norm === "mcp/servers.json" || file.component === "mcp") {
+      let emittedServers = false;
+      try {
+        const parsed = JSON.parse(file.content) as {
+          servers?: Record<string, { command?: string; args?: string[]; enabled?: boolean }>;
+        };
+        if (parsed && parsed.servers && typeof parsed.servers === "object") {
+          for (const [serverKey, cfg] of Object.entries(parsed.servers)) {
+            const trustRec = trustRecords.find(
+              (r) =>
+                r.kind === "mcp" &&
+                (r.identifier === serverKey ||
+                  r.identifier.includes(serverKey) ||
+                  normalizePath(r.identifier) === norm),
+            );
+            const status: TrustStatus =
+              trustRec?.status ?? (cfg?.enabled === false ? "disabled" : "untrusted");
+            const cmdDesc = [cfg?.command, ...(Array.isArray(cfg?.args) ? cfg.args : [])]
+              .filter(Boolean)
+              .join(" ");
+            cards.push({
+              id: `mcp:${norm}:${serverKey}`,
+              kind: "mcp",
+              name: serverKey,
+              path: norm,
+              description: cmdDesc,
+              estimatedTokens: Math.max(1, Math.ceil(JSON.stringify(cfg ?? {}).length / 4)),
+              toggleable: false,
+              enabled: status === "trusted",
+              trustStatus: status,
+              origin: trustRec?.origin,
+              gardenerFindings: findings,
+            });
+            emittedServers = true;
+          }
+        }
+      } catch {
+        // Fallback to single file card below
+      }
+      if (!emittedServers) {
+        const trustRec = trustRecords.find(
+          (r) => r.kind === "mcp" && normalizePath(r.identifier) === norm,
+        );
+        const status: TrustStatus = trustRec?.status ?? "untrusted";
+        cards.push({
+          id: `mcp:${norm}`,
+          kind: "mcp",
+          name: norm,
+          path: norm,
+          description: "",
+          estimatedTokens: tokens,
+          toggleable: false,
+          enabled: status === "trusted",
+          trustStatus: status,
+          origin: trustRec?.origin,
+          gardenerFindings: findings,
+        });
+      }
+    }
+  }
+
+  return cards;
+}
+
 interface GenomeOrganExplorerProps {
   files: GenomeFile[];
   selectedCommit: GenomeCommit | null;
   parentCommit: GenomeCommit | null;
   readGenomeTree: (commitSha: string) => Promise<GenomeFile[]>;
+  trustRecords?: TrustRecord[];
+  globalHooks?: GlobalHookItem[];
+  gardenerReport?: HarnessGardenerReport | null;
+  isHeadCommit?: boolean;
+  onToggleOrgan?: (path: string, enabled: boolean) => Promise<unknown>;
+  onToggleHook?: (hook: GlobalHookItem) => Promise<void>;
+  onTrustHook?: (path: string) => Promise<void>;
 }
 
-type ExplorerTab = "organs" | "diff" | "experience";
+type ExplorerTab = "organs" | "cards" | "diff" | "experience";
+
+const CARD_KIND_ORDER: CapabilityCardKind[] = ["skill", "sub_agent", "hook", "script", "mcp"];
 
 const FILTER_ORDER: OrganFilterCategory[] = [
   "prompt",
@@ -361,11 +650,20 @@ export function GenomeOrganExplorer({
   selectedCommit,
   parentCommit,
   readGenomeTree,
+  trustRecords = [],
+  globalHooks = [],
+  gardenerReport = null,
+  isHeadCommit = true,
+  onToggleOrgan,
+  onToggleHook,
+  onTrustHook,
 }: GenomeOrganExplorerProps) {
   const { locale, t } = useI18n();
 
   const [tab, setTab] = useState<ExplorerTab>("organs");
   const [filter, setFilter] = useState<"all" | OrganFilterCategory>("all");
+  const [cardKindFilter, setCardKindFilter] = useState<"all" | CapabilityCardKind>("all");
+  const [togglingPath, setTogglingPath] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [mdViewMode, setMdViewMode] = useState<"preview" | "raw">("preview");
@@ -376,6 +674,32 @@ export function GenomeOrganExplorer({
   const [collapsedDiffs, setCollapsedDiffs] = useState<Record<string, boolean>>({});
 
   const experienceEntries = useMemo(() => parseExperienceEntries(files), [files]);
+  const capabilityCards = useMemo(
+    () => buildCapabilityCards({ files, trustRecords, globalHooks, gardenerReport }),
+    [files, trustRecords, globalHooks, gardenerReport],
+  );
+  const cardKindCounts = useMemo(() => {
+    const counts: Record<CapabilityCardKind, number> = {
+      skill: 0,
+      sub_agent: 0,
+      hook: 0,
+      script: 0,
+      mcp: 0,
+    };
+    for (const card of capabilityCards) {
+      counts[card.kind] += 1;
+    }
+    return counts;
+  }, [capabilityCards]);
+  const activeCardFilter =
+    cardKindFilter !== "all" && cardKindCounts[cardKindFilter] === 0 ? "all" : cardKindFilter;
+  const visibleCards = useMemo(
+    () =>
+      activeCardFilter === "all"
+        ? capabilityCards
+        : capabilityCards.filter((c) => c.kind === activeCardFilter),
+    [capabilityCards, activeCardFilter],
+  );
 
   const categoryCounts = useMemo(() => {
     const counts: Record<OrganFilterCategory, number> = {
@@ -465,6 +789,49 @@ export function GenomeOrganExplorer({
     return map[cat];
   };
 
+  const cardKindLabel = (kind: CapabilityCardKind): string => {
+    const map: Record<CapabilityCardKind, string> = {
+      skill: t("genome.cardType.skill"),
+      sub_agent: t("genome.cardType.sub_agent"),
+      hook: t("genome.cardType.hook"),
+      script: t("genome.cardType.script"),
+      mcp: t("genome.cardType.mcp"),
+    };
+    return map[kind];
+  };
+
+  const cardKindIcon = (kind: CapabilityCardKind) => {
+    switch (kind) {
+      case "skill":
+        return <Wrench className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />;
+      case "sub_agent":
+        return <Bot className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />;
+      case "hook":
+        return <Webhook className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />;
+      case "script":
+        return <Terminal className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />;
+      case "mcp":
+        return <Plug className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />;
+    }
+  };
+
+  const formatOrigin = (origin?: TrustRecord["origin"]): string | null => {
+    if (!origin) return null;
+    if (origin === "rsi_evolved") return t("hooks.originRsi");
+    if (origin === "imported_genome") return t("hooks.originImported");
+    return t("hooks.originUser");
+  };
+
+  const handleToggleCardOrgan = async (path: string, nextEnabled: boolean) => {
+    if (!onToggleOrgan) return;
+    setTogglingPath(path);
+    try {
+      await onToggleOrgan(path, nextEnabled);
+    } finally {
+      setTogglingPath((prev) => (prev === path ? null : prev));
+    }
+  };
+
   const isMarkdown = activeFile ? /\.md$/i.test(activeFile.path) : false;
   const activeLineCount = activeFile ? splitLines(activeFile.content).length : 0;
 
@@ -477,6 +844,7 @@ export function GenomeOrganExplorer({
           onChange={setTab}
           items={[
             { id: "organs", label: t("genome.tabOrgans"), badge: files.length },
+            { id: "cards", label: t("genome.tabCards"), badge: capabilityCards.length },
             { id: "diff", label: t("genome.tabDiff") },
             {
               id: "experience",
@@ -664,6 +1032,223 @@ export function GenomeOrganExplorer({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Tab 1b: Unified Capability Cards View */}
+      {tab === "cards" && (
+        <div data-testid="genome-capability-cards" className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCardKindFilter("all")}
+                className={cn(
+                  "hx-pressable hx-num inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  activeCardFilter === "all"
+                    ? "border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
+                    : "border-[var(--hx-border)] bg-[var(--hx-surface)] text-[var(--hx-text-2)] hover:text-[var(--hx-text)]",
+                )}
+              >
+                <span>{t("genome.filterAll")}</span>
+                <span className="font-mono text-[10px] opacity-75">{capabilityCards.length}</span>
+              </button>
+              {CARD_KIND_ORDER.filter((k) => cardKindCounts[k] > 0).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setCardKindFilter(kind)}
+                  className={cn(
+                    "hx-pressable hx-num inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                    activeCardFilter === kind
+                      ? "border-[var(--hx-accent-border)] bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
+                      : "border-[var(--hx-border)] bg-[var(--hx-surface)] text-[var(--hx-text-2)] hover:text-[var(--hx-text)]",
+                  )}
+                >
+                  <span>{cardKindLabel(kind)}</span>
+                  <span className="font-mono text-[10px] opacity-75">{cardKindCounts[kind]}</span>
+                </button>
+              ))}
+            </div>
+            {!isHeadCommit && (
+              <span className="text-[11px] text-[var(--hx-text-3)]">
+                {t("genome.cardsReadOnlySnapshot")}
+              </span>
+            )}
+          </div>
+
+          {visibleCards.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[var(--hx-border)] bg-[var(--hx-surface)]/50 p-6 text-center text-xs text-[var(--hx-text-3)]">
+              {t("genome.cardsEmpty")}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+              {visibleCards.map((card) => {
+                const originLabel = formatOrigin(card.origin);
+                const busy = togglingPath === card.path;
+                const statusBadge = (() => {
+                  if (card.trustStatus) {
+                    const cls =
+                      card.trustStatus === "trusted"
+                        ? "border-emerald-500/35 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        : card.trustStatus === "untrusted"
+                          ? "border-amber-500/35 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+                          : "border-[var(--hx-border)] bg-[var(--hx-subtle)] text-[var(--hx-text-3)]";
+                    const label =
+                      card.trustStatus === "trusted"
+                        ? t("sec.statusTrusted")
+                        : card.trustStatus === "untrusted"
+                          ? t("sec.statusUntrusted")
+                          : t("sec.statusDisabled");
+                    return { cls, label };
+                  }
+                  return card.enabled
+                    ? {
+                        cls: "border-emerald-500/30 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+                        label: t("common.enabled"),
+                      }
+                    : {
+                        cls: "border-[var(--hx-border)] bg-[var(--hx-subtle)] text-[var(--hx-text-3)]",
+                        label: t("common.disabled"),
+                      };
+                })();
+
+                return (
+                  <article
+                    key={card.id}
+                    data-testid={`capability-card-${card.kind}-${card.name}`}
+                    className={cn(
+                      "flex flex-col justify-between gap-2.5 rounded-2xl border bg-[var(--hx-surface)] p-3.5 text-xs transition-colors",
+                      card.enabled
+                        ? "border-[var(--hx-border)]"
+                        : "border-[var(--hx-border)]/70 opacity-75",
+                    )}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)]">
+                            {cardKindIcon(card.kind)}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="truncate font-semibold text-[var(--hx-text)]">
+                                {card.name}
+                              </span>
+                              <span className="rounded-md border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--hx-text-2)]">
+                                {cardKindLabel(card.kind)}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedFilePath(card.path);
+                                setFilter("all");
+                                setTab("organs");
+                              }}
+                              className="mt-0.5 block max-w-full truncate font-mono text-[10px] text-[var(--hx-text-3)] hover:text-[var(--hx-accent)] hover:underline"
+                            >
+                              {card.path}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Organ Toggle / Hook Control */}
+                        {card.toggleable && onToggleOrgan && (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={card.enabled}
+                            aria-label={t("genome.toggleOrganAria", { name: card.name })}
+                            data-testid={`organ-toggle-${card.path}`}
+                            disabled={!isHeadCommit || busy}
+                            onClick={() => void handleToggleCardOrgan(card.path, !card.enabled)}
+                            className={cn(
+                              "hx-pressable relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors disabled:opacity-40",
+                              card.enabled
+                                ? "border-emerald-500/40 bg-emerald-500"
+                                : "border-[var(--hx-border-strong)] bg-[var(--hx-muted)]",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform",
+                                card.enabled ? "translate-x-4" : "translate-x-0.5",
+                              )}
+                            />
+                          </button>
+                        )}
+
+                        {card.kind === "hook" && card.hookItem && (
+                          <div className="shrink-0">
+                            {card.trustStatus === "untrusted" && onTrustHook ? (
+                              <button
+                                type="button"
+                                onClick={() => void onTrustHook(card.path)}
+                                className="hx-pressable rounded-lg bg-emerald-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-emerald-500"
+                              >
+                                {t("hooks.trustHook")}
+                              </button>
+                            ) : onToggleHook ? (
+                              <button
+                                type="button"
+                                onClick={() => void onToggleHook(card.hookItem!)}
+                                className="hx-pressable inline-flex items-center gap-1 rounded-lg border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-2 py-1 text-[10px] font-medium text-[var(--hx-text)] hover:border-[var(--hx-border-strong)]"
+                              >
+                                <Power className="h-2.5 w-2.5" />
+                                <span>
+                                  {card.enabled ? t("hooks.disable") : t("hooks.enable")}
+                                </span>
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+
+                      {card.description && (
+                        <p className="line-clamp-2 text-[11px] leading-relaxed text-[var(--hx-text-2)]">
+                          {card.description}
+                        </p>
+                      )}
+
+                      {card.gardenerFindings.length > 0 && (
+                        <div
+                          data-testid={`card-gardener-warning-${card.path}`}
+                          className="flex items-start gap-1.5 rounded-xl border border-amber-500/35 bg-amber-50/75 px-2.5 py-1.5 text-[10.5px] text-amber-900 dark:bg-amber-950/25 dark:text-amber-200"
+                        >
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <div className="min-w-0">
+                            <span className="font-semibold">
+                              {t(`gardener.kind.${card.gardenerFindings[0]!.kind}`)}
+                            </span>
+                            <span className="ml-1 opacity-85">
+                              — {card.gardenerFindings[0]!.detail}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-[var(--hx-border)]/70 pt-2 text-[10px]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={cn("rounded-md border px-1.5 py-0.5 font-medium", statusBadge.cls)}>
+                          {statusBadge.label}
+                        </span>
+                        {originLabel && (
+                          <span className="rounded-md border border-[var(--hx-border)] bg-[var(--hx-subtle)] px-1.5 py-0.5 text-[var(--hx-text-2)]">
+                            {originLabel}
+                          </span>
+                        )}
+                      </div>
+                      <span className="hx-num font-mono text-[var(--hx-text-3)]">
+                        {t("genome.cardTokens", { tokens: card.estimatedTokens })}
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

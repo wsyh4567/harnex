@@ -3,6 +3,7 @@ import { AlertTriangle, Fingerprint, ShieldAlert } from "lucide-react";
 import { localizeApproval } from "../../i18n/demoContent.ts";
 import { useI18n } from "../../i18n/index.ts";
 import { cn, shortSha } from "../../lib/utils.ts";
+import { getRiskReasonMeta } from "./riskReasonMeta.ts";
 
 interface ApprovalCardProps {
   request: ApprovalRequest;
@@ -20,6 +21,7 @@ export function ApprovalCard({ request, onResolve }: ApprovalCardProps) {
   const { locale, t } = useI18n();
   const isHookTrust = request.kind === "hook_trust";
   const loc = localizeApproval(request, locale);
+  const reasonMeta = getRiskReasonMeta(request.riskReasonCode);
 
   return (
     <div
@@ -50,6 +52,17 @@ export function ApprovalCard({ request, onResolve }: ApprovalCardProps) {
             >
               {loc.riskLabel}
             </span>
+            {reasonMeta && (
+              <span
+                data-testid="risk-reason-badge"
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-tight",
+                  reasonMeta.badgeClass,
+                )}
+              >
+                {t(reasonMeta.labelKey)}
+              </span>
+            )}
             {request.sourceTags.some((tag) => tag !== "local") && (
               <span className="rounded-md border border-rose-500/35 bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
                 {t("sec.untrustedSource", { tags: request.sourceTags.join(", ") })}
@@ -57,6 +70,14 @@ export function ApprovalCard({ request, onResolve }: ApprovalCardProps) {
             )}
           </div>
           <p className="font-medium text-[var(--hx-text)]">{loc.summary}</p>
+          {reasonMeta && (
+            <p
+              data-testid="risk-reason-explanation"
+              className="text-[11px] leading-snug text-[var(--hx-text-2)]"
+            >
+              {t(reasonMeta.descKey)}
+            </p>
+          )}
         </div>
       </div>
 

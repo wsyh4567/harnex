@@ -100,6 +100,18 @@ export interface SaveHookParams {
   trustImmediately: boolean;
 }
 
+export interface OrganToggleResult {
+  ok: boolean;
+  newCommitSha?: string;
+  disabledPaths: string[];
+}
+
+export interface StagedImportPreview extends ImportPreview {
+  addedFiles?: string[];
+  overwrittenFiles?: string[];
+  unchangedFiles?: string[];
+}
+
 export interface HarnexIpcClient {
   readonly mode: "mock" | "tauri";
 
@@ -108,6 +120,7 @@ export interface HarnexIpcClient {
   getAppConfig(): Promise<AppConfig>;
   updateAppConfig(patch: Partial<AppConfig>): Promise<AppConfig>;
   setRsiMode(mode: RsiMode): Promise<AppConfig>;
+  pickWorkspaceDirectory(initialDir?: string): Promise<string | null>;
 
   // F0: Onboarding Dual-Mode
   getOnboardingReplay(): Promise<OnboardingReplayTrace>;
@@ -160,9 +173,10 @@ export interface HarnexIpcClient {
   listCommits(): Promise<GenomeCommit[]>;
   readGenomeTree(commitSha: string): Promise<GenomeFile[]>;
   revertToCommit(targetSha: string, reason: string): Promise<GenomeCommit>;
+  gitToggleOrgan(path: string, enabled: boolean): Promise<OrganToggleResult>;
   scanExport(): Promise<ExportScanResult>;
   confirmExport(stripFindings: boolean): Promise<{ archivePath: string; fileCount: number }>;
-  previewImport(archivePath: string): Promise<ImportPreview>;
+  previewImport(archivePath: string): Promise<StagedImportPreview>;
   executeImport(archivePath: string, trustPaths: string[]): Promise<{ importedCount: number }>;
   runReplayCompare(params: ReplayCompareParams): Promise<ReplayComparison>;
 

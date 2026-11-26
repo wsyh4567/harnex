@@ -43,6 +43,12 @@ export function GenomeDeckPanel() {
     selectProposal,
     silentArchiveCount,
     genomeFiles,
+    trustRecords,
+    globalHooks,
+    gardenerReport,
+    toggleOrgan,
+    toggleGlobalHookStatus,
+    trustGlobalHook,
     revertToCommit,
     replayComparison,
     replayRunning,
@@ -330,6 +336,13 @@ export function GenomeDeckPanel() {
           selectedCommit={selectedCommit}
           parentCommit={parentCommit}
           readGenomeTree={(sha) => ipc.readGenomeTree(sha)}
+          trustRecords={trustRecords}
+          globalHooks={globalHooks}
+          gardenerReport={gardenerReport}
+          isHeadCommit={effectiveIdx <= 0}
+          onToggleOrgan={(path, enabled) => toggleOrgan(path, enabled)}
+          onToggleHook={(hook) => toggleGlobalHookStatus(hook)}
+          onTrustHook={(path) => trustGlobalHook(path)}
         />
       </section>
 
@@ -567,6 +580,89 @@ export function GenomeDeckPanel() {
                 {t("genome.rescan")}
               </button>
             </div>
+
+            {/* Staged Conflict & Diff Breakdown */}
+            {(importPreview.addedFiles !== undefined ||
+              importPreview.overwrittenFiles !== undefined ||
+              importPreview.unchangedFiles !== undefined) && (
+              <div
+                data-testid="import-staged-diff-preview"
+                className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-[var(--hx-border)] bg-[var(--hx-subtle)]/70 p-3 text-xs"
+              >
+                <div className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-medium">
+                  <span className="hx-num rounded-md border border-emerald-500/30 bg-emerald-50 px-2 py-0.5 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">
+                    {t("genome.importAddedCount", {
+                      count: importPreview.addedFiles?.length ?? 0,
+                    })}
+                  </span>
+                  <span className="hx-num rounded-md border border-orange-500/35 bg-orange-50 px-2 py-0.5 text-orange-800 dark:bg-orange-500/15 dark:text-orange-200">
+                    {t("genome.importOverwrittenCount", {
+                      count: importPreview.overwrittenFiles?.length ?? 0,
+                    })}
+                  </span>
+                  <span className="hx-num rounded-md border border-[var(--hx-border)] bg-[var(--hx-surface)] px-2 py-0.5 text-[var(--hx-text-2)]">
+                    {t("genome.importUnchangedCount", {
+                      count: importPreview.unchangedFiles?.length ?? 0,
+                    })}
+                  </span>
+                </div>
+
+                {(importPreview.overwrittenFiles?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1 text-[11px] font-semibold text-orange-800 dark:text-orange-300">
+                      <AlertTriangle className="h-3 w-3 shrink-0" />
+                      <span>{t("genome.importOverwrittenTitle")}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {importPreview.overwrittenFiles!.map((filePath) => (
+                        <code
+                          key={filePath}
+                          className="rounded-md border border-orange-500/30 bg-orange-50/80 px-1.5 py-0.5 font-mono text-[10.5px] text-orange-900 dark:bg-orange-950/35 dark:text-orange-200"
+                        >
+                          ~ {filePath}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(importPreview.addedFiles?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      {t("genome.importAddedTitle")}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {importPreview.addedFiles!.map((filePath) => (
+                        <code
+                          key={filePath}
+                          className="rounded-md border border-emerald-500/25 bg-emerald-50/80 px-1.5 py-0.5 font-mono text-[10.5px] text-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-200"
+                        >
+                          + {filePath}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(importPreview.unchangedFiles?.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-medium text-[var(--hx-text-3)]">
+                      {t("genome.importUnchangedTitle")}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {importPreview.unchangedFiles!.map((filePath) => (
+                        <code
+                          key={filePath}
+                          className="rounded-md border border-[var(--hx-border)] bg-[var(--hx-surface)] px-1.5 py-0.5 font-mono text-[10.5px] text-[var(--hx-text-3)]"
+                        >
+                          = {filePath}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-2 rounded-xl border border-amber-500/35 bg-amber-50/75 p-3 text-xs dark:bg-amber-950/20">
               <div className="font-semibold text-amber-900 dark:text-amber-200">

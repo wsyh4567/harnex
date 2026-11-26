@@ -3,6 +3,7 @@ import {
   Check,
   Cpu,
   FlaskConical,
+  FolderOpen,
   FolderPlus,
   GitCommitHorizontal,
   KeyRound,
@@ -47,6 +48,7 @@ export function Sidebar() {
     commits,
     setActiveWorkspace,
     addCustomWorkspace,
+    pickWorkspaceDirectory,
     setActiveThread,
     renameThread,
     deleteThread,
@@ -229,21 +231,33 @@ export function Sidebar() {
             <span className="text-[10px] font-semibold tracking-wider text-[var(--hx-text-3)]">
               {t("nav.sectionWorkspace")}
             </span>
-            <button
-              type="button"
-              data-testid="sidebar-add-workspace-btn"
-              title={t("nav.addWorkspace")}
-              aria-label={t("nav.addWorkspace")}
-              onClick={() => setAddingWorkspace((v) => !v)}
-              className={cn(
-                "hx-pressable rounded-md p-1 transition-colors",
-                addingWorkspace
-                  ? "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
-                  : "text-[var(--hx-text-3)] hover:bg-[var(--hx-muted)]/60 hover:text-[var(--hx-text)]",
-              )}
-            >
-              <FolderPlus className="h-3 w-3" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                data-testid="sidebar-browse-workspace-btn"
+                title={t("nav.browseWorkspace")}
+                aria-label={t("nav.browseWorkspace")}
+                onClick={() => void pickWorkspaceDirectory()}
+                className="hx-pressable rounded-md p-1 text-[var(--hx-text-3)] transition-colors hover:bg-[var(--hx-muted)]/60 hover:text-[var(--hx-text)]"
+              >
+                <FolderOpen className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                data-testid="sidebar-add-workspace-btn"
+                title={t("nav.addWorkspace")}
+                aria-label={t("nav.addWorkspace")}
+                onClick={() => setAddingWorkspace((v) => !v)}
+                className={cn(
+                  "hx-pressable rounded-md p-1 transition-colors",
+                  addingWorkspace
+                    ? "bg-[var(--hx-accent-soft)] text-[var(--hx-accent)]"
+                    : "text-[var(--hx-text-3)] hover:bg-[var(--hx-muted)]/60 hover:text-[var(--hx-text)]",
+                )}
+              >
+                <FolderPlus className="h-3 w-3" />
+              </button>
+            </div>
           </div>
 
           <div className="hx-collapse" data-open={addingWorkspace ? "true" : "false"}>
@@ -266,6 +280,22 @@ export function Sidebar() {
                   placeholder={t("nav.workspacePathPlaceholder")}
                   className="min-w-0 flex-1 bg-transparent font-mono text-[11px] text-[var(--hx-text)] placeholder:text-[var(--hx-text-3)]"
                 />
+                <button
+                  type="button"
+                  title={t("nav.browseWorkspace")}
+                  aria-label={t("nav.browseWorkspace")}
+                  onClick={() => {
+                    void pickWorkspaceDirectory().then((picked) => {
+                      if (picked) {
+                        setWorkspaceDraft("");
+                        setAddingWorkspace(false);
+                      }
+                    });
+                  }}
+                  className="hx-pressable rounded-md p-1 text-[var(--hx-text-3)] hover:bg-[var(--hx-subtle)] hover:text-[var(--hx-text)]"
+                >
+                  <FolderOpen className="h-3 w-3" />
+                </button>
                 <button
                   type="submit"
                   aria-label={t("common.add")}

@@ -21,7 +21,7 @@ import type {
   GuardianDecision,
   HarnessCompatibilityReport,
   HarnessGardenerReport,
-  ImportPreview,
+  MessageAttachmentMeta,
   OnboardingReplayTrace,
   PricingSyncParams,
   PricingSyncResult,
@@ -70,14 +70,17 @@ import type {
   HarnexIpcEvent,
   LiveChallengeParams,
   MagpieImportParams,
+  OrganToggleResult,
   PingProviderResult,
   SaveHookParams,
   SaveProviderParams,
+  StagedImportPreview,
   UpdateBudgetSettingsParams,
 } from "./types.ts";
 
 export interface MockAdapterOptions {
   simulationDelayMs?: number;
+  pickedDirectoryFixture?: string | null;
 }
 
 export class MockIpcAdapter implements HarnexIpcClient {
@@ -128,9 +131,15 @@ export class MockIpcAdapter implements HarnexIpcClient {
   private readonly pausedThreads = new Set<string>();
   private readonly abortedThreads = new Set<string>();
   private readonly steeredInstructions = new Map<string, string[]>();
+  private pickedDirectoryFixture: string | null;
 
   constructor(options: MockAdapterOptions = {}) {
     this.delayMs = options.simulationDelayMs ?? 60;
+    this.pickedDirectoryFixture = options.pickedDirectoryFixture ?? null;
+  }
+
+  setPickedDirectoryFixture(path: string | null): void {
+    this.pickedDirectoryFixture = path;
   }
 
   private emit(event: HarnexIpcEvent): void {
@@ -175,6 +184,10 @@ export class MockIpcAdapter implements HarnexIpcClient {
 
   async setRsiMode(mode: RsiMode): Promise<AppConfig> {
     return this.updateAppConfig({ rsiMode: mode });
+  }
+
+  async pickWorkspaceDirectory(_initialDir?: string): Promise<string | null> {
+    return this.pickedDirectoryFixture;
   }
 
   async getOnboardingReplay(): Promise<OnboardingReplayTrace> {
@@ -288,11 +301,24 @@ export class MockIpcAdapter implements HarnexIpcClient {
       { id: "g-step-3", title: "Verify output & summarize", status: "pending" },
     ];
 
+    const attachmentsMeta: MessageAttachmentMeta[] | undefined =
+      params.attachments && params.attachments.length > 0
+        ? params.attachments.map(({ id, name, mimeType, sizeBytes, width, height }) => ({
+            id,
+            name,
+            mimeType,
+            sizeBytes,
+            ...(width !== undefined ? { width } : {}),
+            ...(height !== undefined ? { height } : {}),
+          }))
+        : undefined;
+
     const userMsg: ChatMessage = {
       id: `msg-u-${Date.now()}`,
       threadId: thread.id,
       role: "user",
       content: params.prompt,
+      ...(attachmentsMeta ? { attachments: attachmentsMeta } : {}),
       createdAt: now,
     };
     this.messagesByThread[thread.id] = [...(this.messagesByThread[thread.id] ?? []), userMsg];
@@ -1447,6 +1473,70 @@ export class MockIpcAdapter implements HarnexIpcClient {
     return rollbackCommit;
   }
 
+  async gitToggleOrgan(organPath: string, enabled: boolean): Promise<OrganToggleResult> {
+    const normalized = organPath.trim().replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+    if (!normalized) {
+      throw new Error("Organ path cannot be empty");
+    }
+    const headCommit = this.commits[0];
+    const headSha = headCommit?.sha ?? this.systemHealth.activeCommitSha;
+    const currentFiles = [...(this.genomeTrees[headSha] ?? [])];
+    const disabledPath = "meta/disabled_organs.json";
+    const existingEntry = currentFiles.find((f) => f.path === disabledPath);
+    const disabledSet = new Set<string>();
+    if (existingEntry) {
+      try {
+        const parsed = JSON.parse(existingEntry.content) as { disabled?: unknown };
+        if (Array.isArray(parsed.disabled)) {
+          for (const item of parsed.disabled) {
+            if (typeof item === "string" && item.trim()) disabledSet.add(item.trim());
+          }
+        }
+      } catch {
+        // Ignore malformed mock registry
+      }
+    }
+    const hadItem = disabledSet.has(normalized);
+    const changed = enabled ? hadItem : !hadItem;
+    if (enabled) disabledSet.delete(normalized);
+    else disabledSet.add(normalized);
+    const disabledPaths = Array.from(disabledSet).sort();
+
+    if (!changed) {
+      return { ok: true, disabledPaths };
+    }
+
+    const content = `${JSON.stringify({ disabled: disabledPaths }, null, 2)}\n`;
+    const updatedEntry: GenomeFile = {
+      path: disabledPath,
+      component: "meta",
+      content,
+      sizeBytes: content.length,
+    };
+    const nextFiles = currentFiles.some((f) => f.path === disabledPath)
+      ? currentFiles.map((f) => (f.path === disabledPath ? updatedEntry : f))
+      : [...currentFiles, updatedEntry];
+
+    const nextNum = this.commits.length + 4;
+    const sha = this.nextSha(nextNum);
+    const toggleCommit: GenomeCommit = {
+      sha,
+      parentSha: headSha,
+      versionTag: `v${nextNum}`,
+      message: `${enabled ? "Enable" : "Disable"} organ ${normalized}`,
+      timestamp: new Date().toISOString(),
+      domain: "organ_toggle",
+      passRate: headCommit?.passRate,
+      changedComponents: ["meta"],
+      isRollback: false,
+    };
+    this.commits = [toggleCommit, ...this.commits];
+    this.genomeTrees[sha] = nextFiles;
+    this.systemHealth.activeCommitSha = sha;
+
+    return { ok: true, newCommitSha: sha, disabledPaths };
+  }
+
   async scanExport(): Promise<ExportScanResult> {
     return {
       includedFiles: [
@@ -1481,22 +1571,41 @@ export class MockIpcAdapter implements HarnexIpcClient {
     };
   }
 
-  async previewImport(archivePath: string): Promise<ImportPreview> {
+  async previewImport(archivePath: string): Promise<StagedImportPreview> {
+    const headSha = this.commits[0]?.sha ?? this.systemHealth.activeCommitSha;
+    const currentFiles = new Map((this.genomeTrees[headSha] ?? []).map((f) => [f.path, f.content]));
+    const existingExperience = currentFiles.get("meta/domains/file_ops/EXPERIENCE.md");
+    const stagedBundle: Record<string, string> = {
+      "manifest.json": '{"schemaVersion":1,"genomeVersion":"community-pack"}',
+      "tool_descriptions/shell.md": "# Shell Tool\nUpdated community shell hints.",
+      "meta/domains/file_ops/EXPERIENCE.md":
+        existingExperience ?? "## Entry #1\n- **Cue**: Multi-file directory aggregation",
+      "scripts/community_pdf_extract.ts": "export function extractPdf() { return []; }",
+      "hooks/post_shell_lint.ts": "export default function lint() { return { ok: true }; }",
+      "mcp/servers.json": '{"servers":{"playwright":{"command":"npx","enabled":false}}}',
+    };
+    const files = Object.keys(stagedBundle);
+    const untrustedExecutables = [
+      "scripts/community_pdf_extract.ts",
+      "hooks/post_shell_lint.ts",
+      "mcp/servers.json",
+    ];
+    const addedFiles: string[] = [];
+    const overwrittenFiles: string[] = [];
+    const unchangedFiles: string[] = [];
+    for (const [filePath, content] of Object.entries(stagedBundle)) {
+      const existing = currentFiles.get(filePath);
+      if (existing === undefined) addedFiles.push(filePath);
+      else if (existing === content) unchangedFiles.push(filePath);
+      else overwrittenFiles.push(filePath);
+    }
     return {
       archivePath,
-      files: [
-        "manifest.json",
-        "tool_descriptions/shell.md",
-        "meta/domains/file_ops/EXPERIENCE.md",
-        "scripts/community_pdf_extract.ts",
-        "hooks/post_shell_lint.ts",
-        "mcp/servers.json",
-      ],
-      untrustedExecutables: [
-        "scripts/community_pdf_extract.ts",
-        "hooks/post_shell_lint.ts",
-        "mcp/servers.json",
-      ],
+      files,
+      untrustedExecutables,
+      addedFiles,
+      overwrittenFiles,
+      unchangedFiles,
     };
   }
 

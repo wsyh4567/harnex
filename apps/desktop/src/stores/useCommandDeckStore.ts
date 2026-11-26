@@ -18,12 +18,13 @@ import type {
   GuardianDecision,
   HarnessCompatibilityReport,
   HarnessGardenerReport,
-  ImportPreview,
+  MessageAttachmentInput,
   ModelSlot,
   OnboardingReplayTrace,
   PricingSyncResult,
   ProviderConfig,
   ProviderImportResult,
+  ReasoningEffort,
   ReplayComparison,
   RsiMode,
   RunMetrics,
@@ -51,11 +52,18 @@ import {
   type HarnexIpcEvent,
   type LiveChallengeParams,
   type MagpieImportParams,
+  type OrganToggleResult,
   type PingProviderResult,
   type SaveHookParams,
   type SaveProviderParams,
+  type StagedImportPreview,
   type UpdateBudgetSettingsParams,
 } from "../ipc/index.ts";
+
+export interface SendMessageOptions {
+  reasoningEffort?: ReasoningEffort;
+  attachments?: MessageAttachmentInput[];
+}
 
 export type RightWorkbenchTab =
   | "triage"
@@ -145,6 +153,7 @@ export interface CommandDeckState {
   inspectorOpen: boolean;
   activeWorkspace: string;
   customWorkspaces: string[];
+  reasoningEffort: ReasoningEffort;
   rightTab: RightWorkbenchTab;
   sideChatOpen: boolean;
   sideChatLoading: boolean;
@@ -203,7 +212,7 @@ export interface CommandDeckState {
   replayComparison: ReplayComparison | null;
   replayRunning: boolean;
   exportScanResult: ExportScanResult | null;
-  importPreview: ImportPreview | null;
+  importPreview: StagedImportPreview | null;
   providers: ProviderConfig[];
   aggregatedCatalog: AggregatedModelEntry[];
   selectedModelByThread: Record<string, SlotBinding>;
@@ -234,10 +243,17 @@ export interface CommandDeckState {
     acceptanceText?: string,
     binding?: SlotBinding,
   ) => Promise<void>;
-  startNewTaskPrompt: (prompt: string, mode?: ExecutionMode, binding?: SlotBinding) => Promise<void>;
+  startNewTaskPrompt: (
+    prompt: string,
+    mode?: ExecutionMode,
+    binding?: SlotBinding,
+    options?: SendMessageOptions,
+  ) => Promise<void>;
   setActiveWorkspace: (workspace: string) => void;
   addCustomWorkspace: (workspace: string) => void;
   removeCustomWorkspace: (workspace: string) => void;
+  pickWorkspaceDirectory: () => Promise<string | null>;
+  setReasoningEffort: (effort: ReasoningEffort) => void;
   setActiveThread: (threadId: string) => Promise<void>;
   renameThread: (threadId: string, title: string) => Promise<void>;
   deleteThread: (threadId: string) => Promise<void>;
@@ -260,7 +276,7 @@ export interface CommandDeckState {
   setThreadModelOverride: (threadId: string, binding: SlotBinding | undefined) => void;
   setComposerDraft: (scopeKey: string, text: string) => void;
   clearComposerDraft: (scopeKey: string) => void;
-  sendPrompt: (prompt: string) => Promise<void>;
+  sendPrompt: (prompt: string, options?: SendMessageOptions) => Promise<void>;
   pauseActiveRun: () => Promise<void>;
   steerActiveRun: (instruction: string, triggerEvolution?: boolean) => Promise<void>;
   resumeActiveRun: () => Promise<void>;
@@ -298,11 +314,12 @@ export interface CommandDeckState {
   // F4 Genome Actions
   selectCommit: (sha: string) => Promise<void>;
   revertToCommit: (targetSha: string, reason: string) => Promise<void>;
+  toggleOrgan: (path: string, enabled: boolean) => Promise<OrganToggleResult | null>;
   runReplayCompare: (params: { taskPrompt: string; v0Sha: string; vNSha: string; modelId?: string }) => Promise<void>;
   scanExport: () => Promise<ExportScanResult>;
   confirmExport: (stripFindings: boolean) => Promise<void>;
   clearExportScan: () => void;
-  previewImport: (archivePath: string) => Promise<ImportPreview>;
+  previewImport: (archivePath: string) => Promise<StagedImportPreview>;
   executeImport: (archivePath: string, trustPaths: string[]) => Promise<void>;
   clearImportPreview: () => void;
 
@@ -358,6 +375,28 @@ export const COMPOSER_DRAFTS_KEY = "harnex:composer-drafts:v1";
 const MAX_COMPOSER_DRAFTS = 20;
 export const CUSTOM_WORKSPACES_KEY = "harnex:workspaces:v1";
 const MAX_CUSTOM_WORKSPACES = 24;
+export const REASONING_EFFORT_KEY = "harnex:reasoning-effort:v1";
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return value === "auto" || value === "low" || value === "medium" || value === "high";
+}
+
+export function loadReasoningEffort(): ReasoningEffort {
+  try {
+    const raw = globalThis.localStorage?.getItem(REASONING_EFFORT_KEY);
+    return isReasoningEffort(raw) ? raw : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+export function saveReasoningEffort(effort: ReasoningEffort): void {
+  try {
+    globalThis.localStorage?.setItem(REASONING_EFFORT_KEY, effort);
+  } catch {
+    // Ignore storage quota or SSR/test unavailability
+  }
+}
 
 function normalizeWorkspaceList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -446,6 +485,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
   inspectorOpen: false,
   activeWorkspace: "~/Work",
   customWorkspaces: loadCustomWorkspaces(),
+  reasoningEffort: loadReasoningEffort(),
   rightTab: "triage",
   sideChatOpen: false,
   sideChatLoading: false,
@@ -609,6 +649,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         activeThreadId,
         activeWorkspace,
         customWorkspaces: savedWorkspaces,
+        reasoningEffort: loadReasoningEffort(),
         messagesByThread: initialMessages,
         pendingApprovals,
         execPolicyRules,
@@ -821,6 +862,30 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     });
   },
 
+  pickWorkspaceDirectory: async () => {
+    try {
+      const picked = await get().ipc.pickWorkspaceDirectory(get().activeWorkspace);
+      if (picked && picked.trim()) {
+        get().addCustomWorkspace(picked.trim());
+        return picked.trim();
+      }
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().pushToast({
+        tone: "error",
+        title: translate(get().locale, "nav.browseWorkspaceError"),
+        detail: message,
+      });
+      return null;
+    }
+  },
+
+  setReasoningEffort: (reasoningEffort) => {
+    saveReasoningEffort(reasoningEffort);
+    set({ reasoningEffort });
+  },
+
   setActiveThread: async (threadId) => {
     const thread = get().threads.find((t) => t.id === threadId);
     const existing = get().messagesByThread[threadId];
@@ -939,7 +1004,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     return thread;
   },
 
-  startNewTaskPrompt: async (prompt, mode = "craft", binding) => {
+  startNewTaskPrompt: async (prompt, mode = "craft", binding, options) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
     const cleanTitle = trimmed.replace(/\s+/g, " ").slice(0, 36);
@@ -948,7 +1013,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       if (binding) {
         get().setThreadModelOverride(thread.id, binding);
       }
-      await get().sendPrompt(trimmed);
+      await get().sendPrompt(trimmed, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       get().setComposerDraft("home", trimmed);
@@ -1002,7 +1067,7 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
     });
   },
 
-  sendPrompt: async (prompt) => {
+  sendPrompt: async (prompt, options) => {
     const trimmed = prompt.trim();
     if (!trimmed) return;
     try {
@@ -1015,6 +1080,9 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       const override = get().selectedModelByThread[threadId];
       const solverSlot = get().appConfig?.slots.solver;
       const activeBinding = override ?? solverSlot;
+      const reasoningEffort = options?.reasoningEffort ?? get().reasoningEffort;
+      const attachments =
+        options?.attachments && options.attachments.length > 0 ? options.attachments : undefined;
 
       await get().ipc.startRun({
         threadId,
@@ -1022,6 +1090,8 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
         mode: thread?.mode ?? "craft",
         providerIdOverride: activeBinding?.providerId,
         modelOverride: activeBinding?.modelId,
+        reasoningEffort,
+        ...(attachments ? { attachments } : {}),
       });
       const msgs = dedupeMessagesById(await get().ipc.getThreadMessages(threadId));
       set((s) => ({
@@ -1428,6 +1498,41 @@ export const useCommandDeckStore = create<CommandDeckState>((set, get) => ({
       title: `Reverted Harness to ${commit.versionTag}`,
       detail: "Active running threads keep their pinned SHA; new runs use reverted genome.",
     });
+  },
+
+  toggleOrgan: async (path, enabled) => {
+    try {
+      const res = await get().ipc.gitToggleOrgan(path, enabled);
+      const [commits, systemHealth] = await Promise.all([
+        get().ipc.listCommits(),
+        get().ipc.getSystemHealth(),
+      ]);
+      const headSha = res.newCommitSha ?? commits[0]?.sha ?? get().selectedCommitSha;
+      const genomeFiles = headSha ? await get().ipc.readGenomeTree(headSha) : get().genomeFiles;
+      set({
+        commits,
+        systemHealth,
+        selectedCommitSha: headSha,
+        genomeFiles,
+      });
+      void get().refreshGardenerReport();
+      get().pushToast({
+        tone: "success",
+        title: enabled
+          ? translate(get().locale, "genome.organEnabledToast")
+          : translate(get().locale, "genome.organDisabledToast"),
+        detail: path,
+      });
+      return res;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      get().pushToast({
+        tone: "error",
+        title: translate(get().locale, "genome.organToggleFailedToast"),
+        detail: message,
+      });
+      return null;
+    }
   },
 
   runReplayCompare: async (params) => {
