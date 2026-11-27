@@ -176,9 +176,10 @@ jobs:
           - **Linux (x64)**: `harnex-tui-linux-x64.tar.gz`
 
           ### Highlights
-          - Real-time LLM token & reasoning summary streaming across OpenAI-compatible, Anthropic, and Gemini thinking models.
-          - Compact collapsible Turn Activity Timeline with interleaved reasoning traces, single-line tool previews, exit codes, and expandable execution logs.
-          - New Ratatui-based `harnex-tui` sharing the exact same Rust L0 sandbox, Keyring, Git genome, SQLite trace store, and interactive L0 approval guard.
+          - **Adaptive Multi-Provider Reasoning & Vision**: Dual-protocol OpenAI (Responses + Chat Completions), 3-tier Anthropic thinking, Gemini thinking, adaptive 4-level reasoning effort (`auto` / `low` / `medium` / `high`) with automatic 400 fallback caching, plus `Ctrl+V` / drag-and-drop multimodal image attachments (metadata-only SQLite persistence).
+          - **L0 Security & Safe Web Research**: Structured, language-independent Rust L0 `RiskReasonCode` classifier across Approval modals, Guardian audit logs, and TUI; standalone read-only `web_fetch` with strict IPv4/IPv6/DNS SSRF & redirect guards and automatic `"web"` taint escalation.
+          - **Living Genome Capability Cards & Read-Only Sub-Agents**: Unified Capability Cards view with Git-versioned organ enable/disable toggles (`meta/disabled_organs.json`), isolated `tempdir` staged import conflict preview, depth-1 read-only `delegate_subagent` (`sub_agents/researcher.md`), and evidence-first distillation guardrails.
+          - **Native Polish & Full TUI Parity**: Native OS folder picker (`rfd`, desktop-only so `harnex-tui` stays zero-GUI), SQLite `INCREMENTAL` auto-vacuum page reclamation, smooth Desktop UI/motion polish, and full `harnex-tui` parity (`/effort`, tool activity summaries, and structured risk badges).
 
           All bundles include the standalone `harnex-sidecar` binary and factory `harness-seed` — no separate Node.js or Bun installation required.
           Verify integrity using `SHA256SUMS.txt`.

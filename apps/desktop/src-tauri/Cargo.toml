@@ -1,6 +1,6 @@
 [package]
 name = "harnex-desktop"
-version = "0.2.2"
+version = "0.3.0"
 description = "Harnex immutable L0 desktop shell, TUI client, and security gateway"
 authors = ["Harnex Contributors"]
 license = "Apache-2.0"
